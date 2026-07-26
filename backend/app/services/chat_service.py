@@ -14,7 +14,7 @@ class ChatService:
         self._ai_engine = ai_engine
 
     def ask(self, message: str) -> ChatResponse:
-        """Generate a response through the configured AI engine."""
+        """Generate a chat response through the configured AI engine."""
 
         start_time = perf_counter()
 
@@ -24,7 +24,7 @@ class ChatService:
         )
 
         try:
-            answer = self._ai_engine.generate_response(message)
+            ai_response = self._ai_engine.generate_response(message)
         except Exception:
             logger.exception(
                 "Chat response generation failed with provider=%s",
@@ -32,16 +32,25 @@ class ChatService:
             )
             raise
 
-        elapsed_ms = (perf_counter() - start_time) * 1000
+        service_latency_ms = (perf_counter() - start_time) * 1000
 
         logger.info(
-            "Chat response generated with provider=%s elapsed_ms=%.2f",
-            self._ai_engine.provider_name,
-            elapsed_ms,
+            (
+                "Chat response generated provider=%s model=%s "
+                "provider_latency_ms=%.2f service_latency_ms=%.2f "
+                "input_tokens=%d output_tokens=%d total_tokens=%d"
+            ),
+            ai_response.provider,
+            ai_response.model,
+            ai_response.latency_ms,
+            service_latency_ms,
+            ai_response.usage.input_tokens,
+            ai_response.usage.output_tokens,
+            ai_response.usage.total_tokens,
         )
 
         return ChatResponse(
-            answer=answer,
+            answer=ai_response.content,
             language="it",
             sources=[],
         )

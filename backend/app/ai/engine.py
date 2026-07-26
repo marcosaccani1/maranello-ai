@@ -1,3 +1,4 @@
+from app.ai.models.response import AIResponse
 from app.ai.providers.base import BaseLLMProvider
 
 
@@ -13,7 +14,7 @@ class AIEngine:
 
         return type(self._provider).__name__
 
-    def generate_response(self, message: str) -> str:
-        """Generate an answer through the configured LLM provider."""
+    def generate_response(self, message: str) -> AIResponse:
+        """Generate a structured response through the configured provider."""
 
         return self._provider.generate(message)

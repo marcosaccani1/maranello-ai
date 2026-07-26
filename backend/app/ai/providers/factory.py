@@ -11,7 +11,7 @@ def create_llm_provider(settings: Settings) -> BaseLLMProvider:
     """Create the LLM provider selected through application settings."""
 
     if settings.llm_provider == "mock":
-        return MockLLMProvider()
+        return MockLLMProvider(model=settings.llm_model)
 
     raise UnsupportedLLMProviderError(
         f"Unsupported LLM provider: {settings.llm_provider}"
