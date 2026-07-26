@@ -1,11 +1,19 @@
+from unittest.mock import Mock
+
+from app.ai.engine import AIEngine
 from app.services.chat_service import ChatService
 
 
-def test_chat_service_returns_temporary_response() -> None:
-    service = ChatService()
+def test_chat_service_uses_ai_engine() -> None:
+    ai_engine = Mock(spec=AIEngine)
+    ai_engine.generate_response.return_value = "Risposta dell'AI Engine"
 
-    response = service.ask("Qual è la policy per il lavoro da remoto?")
+    service = ChatService(ai_engine=ai_engine)
 
+    response = service.ask("Domanda di test")
+
+    assert response.answer == "Risposta dell'AI Engine"
     assert response.language == "it"
     assert response.sources == []
-    assert "Qual è la policy per il lavoro da remoto?" in response.answer
+
+    ai_engine.generate_response.assert_called_once_with("Domanda di test")

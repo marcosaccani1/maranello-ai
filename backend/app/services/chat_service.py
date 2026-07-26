@@ -1,23 +1,20 @@
+from app.ai.engine import AIEngine
 from app.models.chat import ChatResponse
 
 
 class ChatService:
     """Application service responsible for handling chat requests."""
 
+    def __init__(self, ai_engine: AIEngine) -> None:
+        self._ai_engine = ai_engine
+
     def ask(self, message: str) -> ChatResponse:
-        """Generate a temporary response for the submitted message."""
+        """Generate a response through the configured AI engine."""
+
+        answer = self._ai_engine.generate_response(message)
 
         return ChatResponse(
-            answer=(
-                "Maranello AI ha ricevuto correttamente il tuo messaggio: "
-                f'"{message}"'
-            ),
+            answer=answer,
             language="it",
             sources=[],
         )
-
-
-def get_chat_service() -> ChatService:
-    """Return the chat service instance."""
-
-    return ChatService()
