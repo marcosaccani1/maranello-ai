@@ -14,3 +14,10 @@ def test_ai_engine_delegates_generation_to_provider() -> None:
 
     assert response == "Risposta generata"
     provider.generate.assert_called_once_with("Domanda di test")
+
+
+def test_ai_engine_exposes_provider_name() -> None:
+    provider = Mock(spec=BaseLLMProvider)
+    engine = AIEngine(provider=provider)
+
+    assert engine.provider_name == "Mock"
