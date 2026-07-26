@@ -18,8 +18,7 @@ class MockLLMProvider(BaseLLMProvider):
         start_time = perf_counter()
 
         content = (
-            "Maranello AI ha ricevuto correttamente il tuo messaggio: "
-            f'"{message}"'
+            f'Maranello AI ha ricevuto correttamente il tuo messaggio: "{message}"'
         )
 
         latency_ms = (perf_counter() - start_time) * 1000

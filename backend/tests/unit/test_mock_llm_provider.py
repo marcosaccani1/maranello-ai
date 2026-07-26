@@ -7,8 +7,7 @@ def test_mock_provider_returns_structured_response() -> None:
     response = provider.generate("Messaggio di test")
 
     assert response.content == (
-        'Maranello AI ha ricevuto correttamente il tuo messaggio: '
-        '"Messaggio di test"'
+        'Maranello AI ha ricevuto correttamente il tuo messaggio: "Messaggio di test"'
     )
     assert response.provider == "mock"
     assert response.model == "test-model"

@@ -3197,13 +3197,11 @@ Risultato strutturato
 Il Decision Engine non deve produrre codice simile al seguente:
 
 ```python
-
 import pandas as pd
 
 df = pd.read_csv(user_path)
 
 result = eval(user_expression)
-
 ```
 
 Tali operazioni non sono consentite.
