@@ -263,7 +263,7 @@ Currently available:
 - [x] FastAPI Backend
 - [x] Health Endpoint
 - [x] Automated Tests
-- [ ] Streamlit Frontend
+- [x] Streamlit Frontend
 - [ ] Knowledge Base
 - [ ] Document Ingestion
 - [ ] Embeddings
