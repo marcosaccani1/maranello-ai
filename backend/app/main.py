@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.routes.chat import router as chat_router
 from app.api.routes.health import router as health_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -33,6 +34,7 @@ app = FastAPI(
 )
 
 app.include_router(health_router, prefix="/api/v1")
+app.include_router(chat_router, prefix="/api/v1")
 
 
 @app.get("/", tags=["Root"])
@@ -44,4 +46,5 @@ def root() -> dict[str, str]:
         "version": "0.1.0",
         "docs": "/docs",
         "health": "/api/v1/health",
+        "chat": "/api/v1/chat",
     }
