@@ -9,9 +9,7 @@ from pathlib import Path
 from typing import Any
 
 
-DATASET_FILE = (
-    Path(__file__).parent / "manufacturing_quality_data.csv"
-)
+DATASET_FILE = Path(__file__).parent / "manufacturing_quality_data.csv"
 
 EXPECTED_ROWS = 2000
 EXPECTED_COLUMNS = 20
@@ -49,9 +47,7 @@ VALID_DATE_FORMATS = (
 def load_dataset() -> list[dict[str, str]]:
     """Load the dataset from disk."""
     if not DATASET_FILE.exists():
-        raise FileNotFoundError(
-            f"Dataset not found: {DATASET_FILE}"
-        )
+        raise FileNotFoundError(f"Dataset not found: {DATASET_FILE}")
 
     with DATASET_FILE.open(
         "r",
@@ -71,17 +67,12 @@ def count_exact_duplicates(
 ) -> int:
     """Count exact duplicate rows."""
     serialized_rows = [
-        tuple(record[column] for column in EXPECTED_COLUMN_NAMES)
-        for record in records
+        tuple(record[column] for column in EXPECTED_COLUMN_NAMES) for record in records
     ]
 
     frequencies = Counter(serialized_rows)
 
-    return sum(
-        count - 1
-        for count in frequencies.values()
-        if count > 1
-    )
+    return sum(count - 1 for count in frequencies.values() if count > 1)
 
 
 def count_missing_values(
@@ -89,11 +80,7 @@ def count_missing_values(
 ) -> dict[str, int]:
     """Count empty values for every dataset column."""
     return {
-        column: sum(
-            1
-            for record in records
-            if not record[column].strip()
-        )
+        column: sum(1 for record in records if not record[column].strip())
         for column in EXPECTED_COLUMN_NAMES
     }
 
@@ -153,8 +140,7 @@ def count_invalid_defect_relationships(
     return sum(
         1
         for record in records
-        if int(record["defective_units"])
-        > int(record["units_produced"])
+        if int(record["defective_units"]) > int(record["units_produced"])
     )
 
 
@@ -177,11 +163,7 @@ def count_cycle_time_outliers(
     records: list[dict[str, str]],
 ) -> int:
     """Count intentionally extreme cycle-time observations."""
-    return sum(
-        1
-        for record in records
-        if float(record["cycle_time_seconds"]) >= 400
-    )
+    return sum(1 for record in records if float(record["cycle_time_seconds"]) >= 400)
 
 
 def count_dirty_shift_values(
@@ -194,11 +176,7 @@ def count_dirty_shift_values(
         "Night",
     }
 
-    return sum(
-        1
-        for record in records
-        if record["shift"] not in valid_values
-    )
+    return sum(1 for record in records if record["shift"] not in valid_values)
 
 
 def count_dirty_line_values(
@@ -208,8 +186,7 @@ def count_dirty_line_values(
     return sum(
         1
         for record in records
-        if record["production_line"]
-        != record["production_line"].strip()
+        if record["production_line"] != record["production_line"].strip()
     )
 
 
@@ -221,8 +198,7 @@ def count_dirty_supplier_values(
         1
         for record in records
         if record["supplier_id"]
-        and record["supplier_id"]
-        != record["supplier_id"].strip()
+        and record["supplier_id"] != record["supplier_id"].strip()
     )
 
 
@@ -239,12 +215,8 @@ def validate_dataset(records: list[dict[str, str]]) -> dict[str, Any]:
         "missing_supplier_id": missing_values["supplier_id"],
         "missing_downtime": missing_values["downtime_minutes"],
         "date_formats": dict(date_formats),
-        "invalid_quality_scores": count_invalid_quality_scores(
-            records
-        ),
-        "invalid_defect_relationships": (
-            count_invalid_defect_relationships(records)
-        ),
+        "invalid_quality_scores": count_invalid_quality_scores(records),
+        "invalid_defect_relationships": (count_invalid_defect_relationships(records)),
         "downtime_outliers": count_downtime_outliers(records),
         "cycle_time_outliers": count_cycle_time_outliers(records),
         "dirty_shift_values": count_dirty_shift_values(records),

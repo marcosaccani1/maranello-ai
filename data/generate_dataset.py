@@ -93,11 +93,7 @@ def random_date() -> date:
 
 def random_binomial(trials: int, probability: float) -> int:
     """Generate a binomial-like result using deterministic random sampling."""
-    return sum(
-        1
-        for _ in range(trials)
-        if random.random() < probability
-    )
+    return sum(1 for _ in range(trials) if random.random() < probability)
 
 
 def calculate_defect_probability(
@@ -160,19 +156,11 @@ def generate_record(index: int) -> dict[str, Any]:
         defect_probability,
     )
 
-    rework_units = (
-        random.randint(0, defective_units)
-        if defective_units
-        else 0
-    )
+    rework_units = random.randint(0, defective_units) if defective_units else 0
 
     remaining_defects = max(defective_units - rework_units, 0)
 
-    scrap_units = (
-        random.randint(0, remaining_defects)
-        if remaining_defects
-        else 0
-    )
+    scrap_units = random.randint(0, remaining_defects) if remaining_defects else 0
 
     downtime_minutes = max(
         0.0,
@@ -190,17 +178,10 @@ def generate_record(index: int) -> dict[str, Any]:
     if shift == "Night":
         cycle_time_seconds += random.uniform(1, 5)
 
-    defect_rate = (
-        defective_units / units_produced
-        if units_produced
-        else 0
-    )
+    defect_rate = defective_units / units_produced if units_produced else 0
 
     quality_score = (
-        99
-        - defect_rate * 120
-        - downtime_minutes * 0.025
-        + random.gauss(0, 1.2)
+        99 - defect_rate * 120 - downtime_minutes * 0.025 + random.gauss(0, 1.2)
     )
 
     quality_score = round(
@@ -214,9 +195,7 @@ def generate_record(index: int) -> dict[str, Any]:
     )
 
     defect_category = (
-        random.choice(DEFECT_CATEGORIES)
-        if defective_units > 0
-        else "None"
+        random.choice(DEFECT_CATEGORIES) if defective_units > 0 else "None"
     )
 
     temperature_c = round(
@@ -293,18 +272,12 @@ def inject_date_inconsistencies(
     indices = select_unique_indices(len(records), 12)
 
     for position, index in enumerate(indices):
-        original_date = date.fromisoformat(
-            records[index]["production_date"]
-        )
+        original_date = date.fromisoformat(records[index]["production_date"])
 
         if position % 2 == 0:
-            records[index]["production_date"] = (
-                original_date.strftime("%d/%m/%Y")
-            )
+            records[index]["production_date"] = original_date.strftime("%d/%m/%Y")
         else:
-            records[index]["production_date"] = (
-                original_date.strftime("%m-%d-%Y")
-            )
+            records[index]["production_date"] = original_date.strftime("%m-%d-%Y")
 
 
 def inject_invalid_values(
@@ -320,9 +293,7 @@ def inject_invalid_values(
     for index in select_unique_indices(len(records), 6):
         units_produced = records[index]["units_produced"]
 
-        records[index]["defective_units"] = (
-            units_produced + random.randint(1, 10)
-        )
+        records[index]["defective_units"] = units_produced + random.randint(1, 10)
 
 
 def inject_outliers(
@@ -362,10 +333,7 @@ def add_duplicate_records(
         DUPLICATE_RECORDS,
     )
 
-    duplicates = [
-        deepcopy(records[index])
-        for index in duplicate_indices
-    ]
+    duplicates = [deepcopy(records[index]) for index in duplicate_indices]
 
     records.extend(duplicates)
 
@@ -408,10 +376,7 @@ def main() -> None:
     """Generate and persist the complete synthetic dataset."""
     random.seed(RANDOM_SEED)
 
-    records = [
-        generate_record(index)
-        for index in range(1, UNIQUE_RECORDS + 1)
-    ]
+    records = [generate_record(index) for index in range(1, UNIQUE_RECORDS + 1)]
 
     inject_anomalies(records)
     add_duplicate_records(records)
@@ -420,9 +385,7 @@ def main() -> None:
 
     write_dataset(records)
 
-    print(
-        f"Dataset generated successfully: {OUTPUT_FILE}"
-    )
+    print(f"Dataset generated successfully: {OUTPUT_FILE}")
     print(f"Rows generated: {len(records)}")
     print(f"Random seed: {RANDOM_SEED}")
 
