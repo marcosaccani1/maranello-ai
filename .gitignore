@@ -12,6 +12,11 @@ __pycache__/
 .coverage
 htmlcov/
 
+# Python packaging
+build/
+dist/
+*.egg-info/
+
 # Virtual environments
 .venv/
 venv/
@@ -30,20 +35,18 @@ env/
 *.log
 logs/
 
-# Build files
-build/
-dist/
-*.egg-info/
-
-# Frontend
+# Node.js / Frontend
 node_modules/
 .next/
-dist/
 coverage/
 
 # Application-generated data
 data/processed/
 data/vector_store/
+
+# Data Agent generated charts
+data_agent/generated_charts/*
+!data_agent/generated_charts/.gitkeep
 
 # Local databases
 *.db
