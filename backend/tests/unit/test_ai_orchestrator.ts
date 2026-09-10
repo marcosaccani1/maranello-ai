@@ -46,6 +46,7 @@ describe(
             .mockResolvedValue(
               createResponse({
                 id: "response-direct",
+
                 output_text:
                   "Hello from Maranello AI.",
               }),
@@ -89,11 +90,102 @@ describe(
 
 
     it(
+      "continues an existing OpenAI conversation",
+      async () => {
+        const responses = {
+          create: vi.fn()
+            .mockResolvedValue(
+              createResponse({
+                id:
+                  "response-follow-up",
+
+                output_text:
+                  "SUP-07 remains the supplier being discussed.",
+              }),
+            ),
+        };
+
+        const orchestrator =
+          new AIOrchestrator(
+            {
+              responses,
+            },
+            {
+              execute: vi.fn(),
+            },
+          );
+
+        await orchestrator.run(
+          "What about its quality policy?",
+          "response-previous",
+        );
+
+        expect(
+          responses.create,
+        ).toHaveBeenCalledTimes(1);
+
+        expect(
+          responses.create,
+        ).toHaveBeenCalledWith(
+          expect.objectContaining({
+            input:
+              "What about its quality policy?",
+
+            previous_response_id:
+              "response-previous",
+          }),
+        );
+      },
+    );
+
+
+    it(
+      "trims the previous response id",
+      async () => {
+        const responses = {
+          create: vi.fn()
+            .mockResolvedValue(
+              createResponse({
+                output_text:
+                  "Follow-up response.",
+              }),
+            ),
+        };
+
+        const orchestrator =
+          new AIOrchestrator(
+            {
+              responses,
+            },
+            {
+              execute: vi.fn(),
+            },
+          );
+
+        await orchestrator.run(
+          "Follow-up question",
+          "  response-previous  ",
+        );
+
+        expect(
+          responses.create,
+        ).toHaveBeenCalledWith(
+          expect.objectContaining({
+            previous_response_id:
+              "response-previous",
+          }),
+        );
+      },
+    );
+
+
+    it(
       "executes a requested tool and returns the final answer",
       async () => {
         const firstResponse =
           createResponse({
-            id: "response-tool",
+            id:
+              "response-tool",
 
             output: [
               {
@@ -123,7 +215,8 @@ describe(
 
         const finalResponse =
           createResponse({
-            id: "response-final",
+            id:
+              "response-final",
 
             output_text:
               "The critical threshold is defined by policy.",
@@ -227,7 +320,8 @@ describe(
       async () => {
         const firstResponse =
           createResponse({
-            id: "response-hybrid",
+            id:
+              "response-hybrid",
 
             output: [
               {
@@ -280,7 +374,8 @@ describe(
 
         const finalResponse =
           createResponse({
-            id: "response-final",
+            id:
+              "response-final",
 
             output_text:
               "Line 3 performance requires escalation.",
@@ -353,6 +448,39 @@ describe(
           ),
         ).rejects.toThrow(
           "Question must be a non-empty string.",
+        );
+
+        expect(
+          responses.create,
+        ).not.toHaveBeenCalled();
+      },
+    );
+
+
+    it(
+      "rejects an empty previous response id",
+      async () => {
+        const responses = {
+          create: vi.fn(),
+        };
+
+        const orchestrator =
+          new AIOrchestrator(
+            {
+              responses,
+            },
+            {
+              execute: vi.fn(),
+            },
+          );
+
+        await expect(
+          orchestrator.run(
+            "Follow-up question",
+            "   ",
+          ),
+        ).rejects.toThrow(
+          "Previous response ID must be a non-empty string when provided.",
         );
 
         expect(

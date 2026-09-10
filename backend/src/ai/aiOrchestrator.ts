@@ -113,6 +113,7 @@ export class AIOrchestrator {
 
   async run(
     question: string,
+    previousResponseId?: string,
   ): Promise<OrchestrationResult> {
     const normalizedQuestion =
       question.trim();
@@ -123,15 +124,31 @@ export class AIOrchestrator {
       );
     }
 
+    const normalizedPreviousResponseId =
+      previousResponseId?.trim();
+
+    if (
+      previousResponseId !== undefined
+      && !normalizedPreviousResponseId
+    ) {
+      throw new Error(
+        "Previous response ID must be a non-empty string when provided.",
+      );
+    }
+
     let response =
       await this.openAI.responses.create({
-        model: env.llmModel,
+        model:
+          env.llmModel,
 
         instructions:
           SYSTEM_INSTRUCTIONS,
 
         input:
           normalizedQuestion,
+
+        previous_response_id:
+          normalizedPreviousResponseId,
 
         tools: [
           ...TOOL_DEFINITIONS,
