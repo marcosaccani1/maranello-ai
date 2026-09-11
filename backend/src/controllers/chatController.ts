@@ -18,6 +18,34 @@ export interface ChatServiceProvider {
 }
 
 
+function isDataAgentUnavailableError(
+  error: unknown,
+): boolean {
+  return (
+    error instanceof Error
+    && error.message ===
+      "Unable to connect to the Data Agent."
+  );
+}
+
+
+function isKnowledgeBaseUnavailableError(
+  error: unknown,
+): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return (
+    error.name ===
+      "ChromaConnectionError"
+    || error.message.includes(
+      "Failed to connect to chromadb",
+    )
+  );
+}
+
+
 export function createChatController(
   chatService: ChatServiceProvider,
 ) {
@@ -75,6 +103,32 @@ export function createChatController(
         response.status(400).json({
           error:
             error.message,
+        });
+
+        return;
+      }
+
+      if (
+        isDataAgentUnavailableError(
+          error,
+        )
+      ) {
+        response.status(503).json({
+          error:
+            "Manufacturing data analysis is temporarily unavailable. Please try again later.",
+        });
+
+        return;
+      }
+
+      if (
+        isKnowledgeBaseUnavailableError(
+          error,
+        )
+      ) {
+        response.status(503).json({
+          error:
+            "The company knowledge base is temporarily unavailable. Please try again later.",
         });
 
         return;
