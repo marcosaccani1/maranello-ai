@@ -43,6 +43,44 @@ interface OrchestratorProvider {
 }
 
 
+function toPublicChartUrl(
+  chartUrl?: string,
+): string | undefined {
+  if (!chartUrl) {
+    return undefined;
+  }
+
+  const normalizedChartUrl =
+    chartUrl.trim();
+
+  if (!normalizedChartUrl) {
+    return undefined;
+  }
+
+  const chartPrefix =
+    "/charts/";
+
+  if (
+    !normalizedChartUrl.startsWith(
+      chartPrefix,
+    )
+  ) {
+    return normalizedChartUrl;
+  }
+
+  const filename =
+    normalizedChartUrl.slice(
+      chartPrefix.length,
+    );
+
+  if (!filename) {
+    return undefined;
+  }
+
+  return `/api/charts/${filename}`;
+}
+
+
 export class ChatService {
   constructor(
     private readonly conversationManager:
@@ -113,6 +151,11 @@ export class ChatService {
         result.responseId,
       );
 
+    const chartUrl =
+      toPublicChartUrl(
+        result.chartUrl,
+      );
+
     return {
       sessionId:
         session.id,
@@ -126,6 +169,12 @@ export class ChatService {
       toolsUsed: [
         ...result.toolsUsed,
       ],
+
+      ...(chartUrl
+        ? {
+            chartUrl,
+          }
+        : {}),
     };
   }
 }

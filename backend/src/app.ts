@@ -4,6 +4,10 @@ import express from "express";
 import { env } from "./config/env.js";
 
 import {
+  createChartRouter,
+} from "./routes/chartRoutes.js";
+
+import {
   createChatRouter,
 } from "./routes/chatRoutes.js";
 
@@ -66,6 +70,12 @@ app.get(
 app.use(
   "/api/chat",
   createChatRouter(),
+);
+
+
+app.use(
+  "/api/charts",
+  createChartRouter(),
 );
 
 

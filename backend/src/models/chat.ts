@@ -9,4 +9,5 @@ export interface ChatResult {
   responseId: string;
   answer: string;
   toolsUsed: string[];
+  chartUrl?: string;
 }

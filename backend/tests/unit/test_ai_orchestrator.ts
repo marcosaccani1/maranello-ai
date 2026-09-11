@@ -426,6 +426,117 @@ describe(
 
 
     it(
+      "returns a chart URL produced by the manufacturing data tool",
+      async () => {
+        const firstResponse =
+          createResponse({
+            id:
+              "response-chart-tool",
+
+            output: [
+              {
+                type:
+                  "function_call",
+
+                id:
+                  "chart-call-item",
+
+                call_id:
+                  "chart-call-1",
+
+                name:
+                  TOOL_NAMES.analyzeManufacturingData,
+
+                arguments:
+                  JSON.stringify({
+                    question:
+                      "Show the monthly defect rate trend.",
+                  }),
+
+                status:
+                  "completed",
+              },
+            ],
+          });
+
+        const finalResponse =
+          createResponse({
+            id:
+              "response-chart-final",
+
+            output_text:
+              "The monthly defect rate trend has been generated.",
+          });
+
+        const responses = {
+          create: vi.fn()
+            .mockResolvedValueOnce(
+              firstResponse,
+            )
+            .mockResolvedValueOnce(
+              finalResponse,
+            ),
+        };
+
+        const toolExecutor = {
+          execute: vi.fn()
+            .mockResolvedValue({
+              toolName:
+                TOOL_NAMES.analyzeManufacturingData,
+
+              data: {
+                success: true,
+
+                result: {
+                  analysis_type:
+                    "monthly_trend",
+
+                  summary:
+                    "Monthly defect rate trend.",
+
+                  data: [],
+
+                  chart_url:
+                    "/charts/monthly_defect_rate_test.png",
+                },
+
+                error: null,
+              },
+            }),
+        };
+
+        const orchestrator =
+          new AIOrchestrator(
+            {
+              responses,
+            },
+            toolExecutor,
+          );
+
+        const result =
+          await orchestrator.run(
+            "Show the monthly defect rate trend.",
+          );
+
+        expect(result).toEqual({
+          responseId:
+            "response-chart-final",
+
+          answer:
+            "The monthly defect rate trend has been generated.",
+
+          toolsUsed: [
+            TOOL_NAMES.analyzeManufacturingData,
+          ],
+
+          chartUrl:
+            "/charts/monthly_defect_rate_test.png",
+        });
+      },
+    );
+
+
+    it(
       "rejects an empty question",
       async () => {
         const responses = {

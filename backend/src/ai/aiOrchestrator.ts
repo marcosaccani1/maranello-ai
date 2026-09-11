@@ -8,6 +8,7 @@ import {
 
 import {
   TOOL_DEFINITIONS,
+  TOOL_NAMES,
 } from "./toolDefinitions.js";
 
 import {
@@ -81,6 +82,7 @@ export interface OrchestrationResult {
   responseId: string;
   answer: string;
   toolsUsed: string[];
+  chartUrl?: string;
 }
 
 
@@ -96,6 +98,75 @@ function parseArguments(
       "The LLM returned invalid JSON tool arguments.",
     );
   }
+}
+
+
+function extractChartUrl(
+  result: unknown,
+): string | null {
+  if (
+    typeof result !== "object"
+    || result === null
+  ) {
+    return null;
+  }
+
+  const toolResult =
+    result as Record<
+      string,
+      unknown
+    >;
+
+  if (
+    toolResult.toolName
+    !== TOOL_NAMES.analyzeManufacturingData
+  ) {
+    return null;
+  }
+
+  const data =
+    toolResult.data;
+
+  if (
+    typeof data !== "object"
+    || data === null
+  ) {
+    return null;
+  }
+
+  const dataResponse =
+    data as Record<
+      string,
+      unknown
+    >;
+
+  const analysisResult =
+    dataResponse.result;
+
+  if (
+    typeof analysisResult !== "object"
+    || analysisResult === null
+  ) {
+    return null;
+  }
+
+  const analysisRecord =
+    analysisResult as Record<
+      string,
+      unknown
+    >;
+
+  const chartUrl =
+    analysisRecord.chart_url;
+
+  if (
+    typeof chartUrl !== "string"
+    || !chartUrl.trim()
+  ) {
+    return null;
+  }
+
+  return chartUrl.trim();
 }
 
 
@@ -157,6 +228,9 @@ export class AIOrchestrator {
 
     const toolsUsed: string[] = [];
 
+    let chartUrl:
+      string | null = null;
+
     while (true) {
       if (
         response.status !== "completed"
@@ -200,6 +274,12 @@ export class AIOrchestrator {
           answer,
 
           toolsUsed,
+
+          ...(chartUrl
+            ? {
+                chartUrl,
+              }
+            : {}),
         };
       }
 
@@ -217,6 +297,16 @@ export class AIOrchestrator {
                   call.name,
                   args,
                 );
+
+              const detectedChartUrl =
+                extractChartUrl(
+                  result,
+                );
+
+              if (detectedChartUrl) {
+                chartUrl =
+                  detectedChartUrl;
+              }
 
               toolsUsed.push(
                 call.name,

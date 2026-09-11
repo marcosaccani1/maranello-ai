@@ -231,6 +231,56 @@ describe(
 
 
     it(
+      "maps a Data Agent chart URL to the backend chart proxy",
+      async () => {
+        const session =
+          createSession();
+
+        const conversationManager =
+          createConversationManager(
+            session,
+          );
+
+        const orchestrator = {
+          run:
+            vi.fn()
+              .mockResolvedValue({
+                responseId:
+                  "response-chart",
+
+                answer:
+                  "The monthly defect rate trend has been generated.",
+
+                toolsUsed: [
+                  "analyze_manufacturing_data",
+                ],
+
+                chartUrl:
+                  "/charts/monthly_defect_rate_test.png",
+              }),
+        };
+
+        const service =
+          new ChatService(
+            conversationManager,
+            orchestrator,
+          );
+
+        const result =
+          await service.sendMessage(
+            "Show the monthly defect rate trend.",
+          );
+
+        expect(
+          result.chartUrl,
+        ).toBe(
+          "/api/charts/monthly_defect_rate_test.png",
+        );
+      },
+    );
+
+
+    it(
       "reuses a provided session id",
       async () => {
         const session =
