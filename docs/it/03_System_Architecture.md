@@ -1,11 +1,11 @@
 # System Architecture
 
 > **Progetto:** Maranello AI  
-> **Versione:** 1.0  
+> **Versione:** 2.0  
 > **Tipo documento:** System Architecture Document (SAD)  
-> **Stato:** Draft  
+> **Stato:** Final  
 > **Autore:** Marco Saccani  
-> **Ultimo aggiornamento:** Luglio 2026
+> **Ultimo aggiornamento:** Settembre 2026
 
 ---
 
@@ -35,125 +35,181 @@
 
 ## 1.1 Scopo
 
-Il presente documento descrive l'architettura software del progetto **Maranello AI**.
+Il presente documento descrive l'architettura software finale del progetto **Maranello AI**.
 
-L'obiettivo è illustrare la struttura dell'applicazione, i componenti principali, le responsabilità di ciascun modulo e le modalità di comunicazione tra i servizi.
+L'obiettivo è illustrare la struttura dell'applicazione, i componenti principali, le responsabilità di ciascun modulo, le modalità di comunicazione tra i servizi e le principali decisioni architetturali adottate durante l'implementazione.
 
-Questo documento costituisce il riferimento principale per l'implementazione tecnica del sistema e rappresenta il collegamento tra i requisiti software definiti nella Software Requirements Specification e il codice sorgente.
+Il documento rappresenta l'architettura **as-built** del sistema, ovvero la configurazione effettivamente implementata e validata al termine dello sviluppo.
+
+Costituisce inoltre il collegamento tra i requisiti software definiti nella Software Requirements Specification e il codice sorgente finale dell'applicazione.
 
 ---
 
 ## 1.2 Obiettivi
 
-L'architettura è stata progettata con i seguenti obiettivi.
+L'architettura è stata progettata e implementata con i seguenti obiettivi:
 
-- Separazione delle responsabilità.
-- Elevata modularità.
-- Facilità di manutenzione.
-- Scalabilità.
-- Estendibilità.
-- Supporto a nuovi strumenti AI.
-- Facilità di testing.
-- Riutilizzabilità dei componenti.
+- separazione delle responsabilità;
+- elevata modularità;
+- facilità di manutenzione;
+- scalabilità;
+- estendibilità;
+- supporto a nuovi strumenti AI;
+- facilità di testing;
+- riutilizzabilità dei componenti;
+- isolamento dei servizi specializzati;
+- affidabilità nella comunicazione tra i componenti;
+- tracciabilità delle decisioni dell'agente attraverso l'utilizzo esplicito dei tool.
 
 ---
 
 ## 1.3 Visione architetturale
 
-Maranello AI è stato progettato come un sistema distribuito composto da più servizi indipendenti.
+Maranello AI è un sistema distribuito organizzato secondo un'architettura a servizi, progettato per supportare il reparto **Quality & Manufacturing Operations** di un produttore automotive premium fittizio.
 
-Ogni componente svolge una responsabilità specifica e comunica con gli altri esclusivamente tramite interfacce ben definite.
+Il sistema integra due tipologie complementari di conoscenza aziendale:
 
-L'elemento centrale dell'architettura è l'**AI Decision Engine**, incaricato di analizzare le richieste degli utenti, selezionare il flusso di elaborazione più appropriato e coordinare i servizi coinvolti nella generazione della risposta.
+- documentazione testuale relativa a policy e procedure operative;
+- dati strutturati relativi ai processi produttivi e alla qualità.
 
-L'utente interagisce esclusivamente con una semplice interfaccia conversazionale, mentre tutta la complessità dell'elaborazione rimane nascosta all'interno del backend.
+Ogni componente svolge una responsabilità specifica e comunica con gli altri tramite interfacce chiaramente definite.
+
+L'elemento centrale dell'architettura è il backend Node.js, che ospita l'**AI Decision Engine** e coordina l'interazione tra il modello linguistico, il sistema Retrieval-Augmented Generation e il Python Data Agent.
+
+Attraverso il meccanismo di function calling, il modello linguistico decide autonomamente se una richiesta richiede:
+
+- il recupero di informazioni dalla Knowledge Base;
+- un'analisi numerica del Manufacturing Dataset;
+- l'utilizzo combinato di entrambi gli strumenti;
+- una risposta conversazionale che non richiede strumenti esterni.
+
+L'utente interagisce esclusivamente tramite un'unica interfaccia conversazionale React, mentre la selezione degli strumenti, l'esecuzione delle analisi e l'aggregazione dei risultati vengono gestite dal backend.
 
 ---
 
 # 2. Obiettivi architetturali
 
-L'architettura del sistema è stata progettata per soddisfare i seguenti obiettivi.
+L'architettura finale del sistema soddisfa i seguenti obiettivi.
 
 | ID | Obiettivo |
 |----|-----------|
-| AG-001 | Separare completamente frontend e backend. |
-| AG-002 | Isolare la logica AI dalla logica applicativa. |
-| AG-003 | Rendere indipendente il motore RAG. |
-| AG-004 | Rendere indipendente il Data Agent Python. |
+| AG-001 | Separare frontend, orchestrazione backend e analisi dati. |
+| AG-002 | Isolare la logica di orchestrazione AI dalla logica dell'interfaccia utente. |
+| AG-003 | Incapsulare il retrieval documentale come strumento specializzato del backend. |
+| AG-004 | Rendere indipendente il Python Data Agent tramite un microservizio dedicato. |
 | AG-005 | Consentire l'aggiunta di nuovi strumenti AI senza modificare il frontend. |
-| AG-006 | Ridurre l'accoppiamento tra i componenti. |
-| AG-007 | Favorire la manutenzione del codice. |
+| AG-006 | Ridurre l'accoppiamento tra i componenti attraverso interfacce definite. |
+| AG-007 | Favorire manutenzione, testing e debugging dei singoli componenti. |
 | AG-008 | Consentire l'evoluzione futura dell'architettura. |
+| AG-009 | Consentire all'LLM di selezionare autonomamente uno o più strumenti tramite function calling. |
+| AG-010 | Mantenere il contesto conversazionale tra richieste appartenenti alla stessa sessione. |
+| AG-011 | Supportare richieste e risposte in italiano e inglese. |
+| AG-012 | Gestire in modo controllato l'indisponibilità temporanea dei servizi dipendenti. |
 
 ---
 
 # 3. Principi architetturali
 
-L'intera architettura è stata progettata seguendo alcuni principi fondamentali di software engineering.
+L'architettura finale di Maranello AI segue principi di software engineering orientati alla modularità, alla testabilità e alla separazione delle responsabilità.
 
 ## 3.1 Single Responsibility Principle
 
-Ogni componente del sistema possiede una singola responsabilità.
+Ogni componente possiede una responsabilità chiaramente identificabile.
 
-Ad esempio:
+In particolare:
 
-- il frontend gestisce esclusivamente l'interfaccia utente;
-- il backend coordina i servizi;
-- il Decision Engine prende le decisioni;
-- il RAG recupera la documentazione;
-- il Data Agent analizza i dati.
+- il frontend gestisce l'interazione con l'utente e lo stato dell'interfaccia;
+- il backend gestisce API, sessione conversazionale e orchestrazione;
+- l'AI Decision Engine coordina il processo di tool selection e tool execution;
+- il componente RAG esegue il retrieval semantico della documentazione aziendale;
+- ChromaDB mantiene la rappresentazione vettoriale della Knowledge Base;
+- il Python Data Agent esegue data cleaning, analisi numeriche e generazione di grafici;
+- il Manufacturing Dataset rappresenta la sorgente strutturata utilizzata per le analisi quantitative.
 
 ---
 
 ## 3.2 Separation of Concerns
 
-Ogni livello dell'applicazione è indipendente dagli altri.
+Le responsabilità dell'applicazione sono distribuite tra componenti distinti.
 
-La logica di business non dipende dalla tecnologia utilizzata per l'interfaccia grafica né dagli strumenti AI impiegati.
+La logica dell'interfaccia utente non contiene logica di retrieval o analisi dati. Allo stesso modo, il Python Data Agent non gestisce la conversazione né decide autonomamente quando essere utilizzato.
+
+La decisione relativa agli strumenti da invocare viene centralizzata nel backend attraverso il modello linguistico e il meccanismo di function calling.
+
+Questa separazione consente di modificare o sostituire un componente limitando l'impatto sugli altri livelli dell'applicazione.
 
 ---
 
 ## 3.3 Modularità
 
-Tutti i servizi sono progettati come moduli indipendenti.
+I componenti principali sono organizzati come moduli indipendenti e comunicano attraverso interfacce definite.
 
-Questo permette di sostituire un componente senza modificare il resto del sistema.
+Il frontend comunica esclusivamente con il backend Node.js.
+
+Il backend comunica con:
+
+- OpenAI API per l'orchestrazione tramite LLM;
+- ChromaDB per il retrieval semantico;
+- Python Data Agent tramite API REST.
+
+Il Python Data Agent accede autonomamente al Manufacturing Dataset e restituisce al backend risultati strutturati, insight narrativi ed eventuali riferimenti ai grafici generati.
+
+Questa organizzazione riduce le dipendenze dirette tra i componenti.
 
 ---
 
 ## 3.4 Scalabilità
 
-L'architettura consente l'aggiunta di nuovi servizi AI mantenendo invariata la struttura generale dell'applicazione.
+La separazione tra frontend, backend, database vettoriale e Data Agent consente di evolvere ciascun componente indipendentemente.
+
+L'architettura permette, ad esempio, di:
+
+- aggiungere nuovi tool al processo di orchestrazione;
+- integrare nuove sorgenti documentali;
+- supportare ulteriori dataset;
+- sostituire o aggiornare il modello linguistico;
+- distribuire i servizi in ambienti separati;
+- introdurre meccanismi di persistenza o autenticazione senza riprogettare l'intera applicazione.
 
 ---
 
 ## 3.5 Estendibilità
 
-Nuovi strumenti, modelli AI o sorgenti dati possono essere integrati tramite nuovi connettori senza modificare l'interfaccia utente.
+Il sistema è progettato affinché nuovi strumenti, modelli AI e sorgenti dati possano essere integrati senza modificare l'interfaccia conversazionale.
+
+Il meccanismo di function calling permette di estendere il set di capacità disponibili all'agente introducendo nuove definizioni di tool e relativi executor.
+
+Questa caratteristica consente di evolvere Maranello AI da assistente specializzato in **Quality & Manufacturing Operations** verso una piattaforma capace di integrare ulteriori funzioni aziendali mantenendo invariato il modello generale di interazione.
 
 ---
 
 # 4. Architettura generale
 
-L'applicazione è organizzata secondo un'architettura a servizi.
+Maranello AI è organizzato secondo un'architettura a servizi con orchestrazione centralizzata nel backend Node.js.
 
 I componenti principali sono:
 
-- Frontend React
-- Backend Node.js
-- AI Decision Engine
-- Retrieval-Augmented Generation Engine
-- Python Data Agent
-- ChromaDB
-- Dataset CSV
+- React Frontend;
+- Node.js Backend;
+- AI Decision Engine;
+- OpenAI API;
+- RAG Module;
+- ChromaDB;
+- Python Data Agent;
+- Manufacturing Dataset.
 
-L'utente comunica esclusivamente con il frontend.
+L'utente comunica esclusivamente con il frontend React.
 
-Ogni richiesta viene inoltrata al backend, che delega il processo decisionale all'AI Decision Engine.
+Ogni richiesta viene inviata al backend Node.js tramite API REST. Il backend mantiene il contesto della sessione e delega all'AI Decision Engine la gestione della richiesta.
 
-Quest'ultimo determina il flusso di elaborazione più appropriato e coordina l'utilizzo del motore RAG, del Python Data Agent oppure di entrambi.
+L'AI Decision Engine utilizza il modello linguistico e il meccanismo di function calling per determinare autonomamente se invocare:
 
-La risposta finale viene costruita dal backend e restituita all'interfaccia conversazionale.
+- `search_knowledge_base`, per recuperare informazioni documentali;
+- `analyze_manufacturing_data`, per effettuare analisi quantitative;
+- entrambi gli strumenti, quando la richiesta combina dati e procedure;
+- nessuno strumento, quando la richiesta può essere gestita direttamente a livello conversazionale.
+
+I risultati dei tool vengono restituiti al modello linguistico, che produce la risposta finale mantenendo la lingua e il contesto della conversazione.
 
 ---
 
@@ -162,42 +218,36 @@ La risposta finale viene costruita dal backend e restituita all'interfaccia conv
 ```mermaid
 flowchart LR
 
-User["Utente"]
+    User["Utente"]
+    Frontend["React Frontend"]
+    Backend["Node.js Backend"]
+    Decision["AI Decision Engine<br/>OpenAI Function Calling"]
+    OpenAI["OpenAI API"]
+    RAG["RAG Module"]
+    Chroma["ChromaDB"]
+    DataAgent["Python Data Agent<br/>FastAPI"]
+    Dataset["Manufacturing Dataset<br/>CSV"]
 
-Frontend["React Frontend"]
-
-Backend["Node.js Backend"]
-
-Decision["AI Decision Engine"]
-
-RAG["RAG Engine"]
-
-DataAgent["Python Data Agent"]
-
-Chroma["ChromaDB"]
-
-Dataset["Manufacturing Dataset"]
-
-User --> Frontend
-
-Frontend --> Backend
-
-Backend --> Decision
-
-Decision --> RAG
-
-Decision --> DataAgent
-
-RAG --> Chroma
-
-DataAgent --> Dataset
-
-RAG --> Backend
-
-DataAgent --> Backend
-
-Backend --> Frontend
+    User --> Frontend
+    Frontend -->|"POST /api/chat"| Backend
+    Backend --> Decision
+    Decision <--> OpenAI
+    Decision -->|"search_knowledge_base"| RAG
+    Decision -->|"analyze_manufacturing_data"| DataAgent
+    RAG <--> Chroma
+    DataAgent --> Dataset
+    RAG --> Decision
+    DataAgent --> Decision
+    Decision --> Backend
+    Backend --> Frontend
+    Frontend --> User
 ```
+
+Il diagramma evidenzia il ruolo centrale del Decision Engine.
+
+La selezione tra RAG e Data Agent non viene effettuata dal frontend né tramite regole statiche nel controller HTTP. La decisione viene delegata al modello linguistico attraverso le definizioni dei tool disponibili.
+
+Questo permette al sistema di gestire anche richieste ibride, nelle quali entrambi gli strumenti vengono invocati prima della generazione della risposta finale.
 
 ---
 
@@ -205,13 +255,14 @@ Backend --> Frontend
 
 | Componente | Responsabilità |
 |------------|----------------|
-| Frontend | Interfaccia conversazionale dell'utente |
-| Backend | Coordinamento dell'intera applicazione |
-| AI Decision Engine | Analisi dell'intento e selezione del flusso di elaborazione |
-| RAG Engine | Recupero della documentazione aziendale |
-| ChromaDB | Ricerca semantica nella Knowledge Base |
-| Python Data Agent | Analisi del dataset e generazione di grafici |
-| Dataset | Archivio dei dati di produzione utilizzato dal Data Agent |
+| React Frontend | Gestisce l'interfaccia conversazionale, lo stato dei messaggi, il caricamento e la visualizzazione dei grafici. |
+| Node.js Backend | Espone le API, gestisce le sessioni e coordina l'intera elaborazione. |
+| AI Decision Engine | Utilizza l'LLM e il function calling per selezionare ed eseguire gli strumenti necessari. |
+| OpenAI API | Fornisce il modello linguistico utilizzato per comprensione, tool selection e sintesi finale. |
+| RAG Module | Esegue il retrieval semantico della documentazione aziendale. |
+| ChromaDB | Memorizza e ricerca le rappresentazioni vettoriali della Knowledge Base. |
+| Python Data Agent | Pulisce e analizza il dataset, calcola KPI e genera grafici. |
+| Manufacturing Dataset | Contiene i dati sintetici di produzione e qualità utilizzati nelle analisi quantitative. |
 
 ---
 
@@ -219,28 +270,39 @@ Backend --> Frontend
 
 ## 5.1 Contesto del sistema
 
-Maranello AI è una piattaforma software progettata per supportare gli operatori del reparto **Quality & Manufacturing Operations** nell'accesso rapido a informazioni aziendali e nell'analisi dei dati di produzione.
+Maranello AI è una piattaforma software progettata per supportare il reparto **Quality & Manufacturing Operations** di un produttore automotive premium fittizio.
 
-L'applicazione rappresenta un unico punto di accesso verso differenti sorgenti informative:
+Il sistema affronta due esigenze informative complementari:
+
+1. recuperare rapidamente informazioni contenute in policy e procedure aziendali;
+2. ottenere KPI, trend e insight dai dati strutturati relativi ai processi produttivi.
+
+L'applicazione fornisce un unico punto di accesso conversazionale verso:
 
 - documentazione aziendale;
-- dataset di produzione;
-- modelli di intelligenza artificiale.
+- Manufacturing Dataset;
+- capacità analitiche Python;
+- modello linguistico;
+- retrieval semantico.
 
-L'utente interagisce esclusivamente tramite una chat web, senza conoscere la complessità dell'architettura sottostante.
+L'utente non deve conoscere quale sorgente o servizio sia necessario per rispondere alla propria richiesta.
 
-L'intero processo decisionale viene gestito automaticamente dal sistema.
+La selezione degli strumenti viene gestita autonomamente dall'AI Decision Engine.
+
+Il sistema supporta inoltre richieste in italiano e inglese e mantiene il contesto tra messaggi appartenenti alla stessa sessione conversazionale.
 
 ---
 
-## 5.2 Attori esterni
+## 5.2 Attori e sistemi esterni
 
-| Attore | Descrizione |
-|---------|-------------|
-| Operatore | Utilizza il sistema per consultare documentazione e analizzare dati. |
-| OpenAI API | Fornisce il Large Language Model utilizzato dal Decision Engine. |
-| Knowledge Base | Contiene la documentazione aziendale indicizzata. |
-| Manufacturing Dataset | Contiene i dati di produzione utilizzati dal Data Agent. |
+| Attore / Sistema | Descrizione |
+|------------------|-------------|
+| Operatore Quality & Manufacturing | Interagisce con Maranello AI tramite l'interfaccia conversazionale. |
+| OpenAI API | Fornisce il modello linguistico utilizzato per orchestrazione, function calling e generazione della risposta. |
+| Knowledge Base | Contiene le policy e procedure aziendali fittizie utilizzate dal sistema RAG. |
+| Manufacturing Dataset | Contiene i dati strutturati utilizzati dal Python Data Agent. |
+
+ChromaDB e il Python Data Agent non vengono considerati attori esterni dal punto di vista del System Context, poiché fanno parte dell'architettura interna di Maranello AI.
 
 ---
 
@@ -249,31 +311,20 @@ L'intero processo decisionale viene gestito automaticamente dal sistema.
 ```mermaid
 flowchart LR
 
-User["Operatore"]
+    User["Quality & Manufacturing<br/>Operator"]
+    System["Maranello AI"]
+    OpenAI["OpenAI API"]
+    KB["Enterprise<br/>Knowledge Base"]
+    Dataset["Manufacturing<br/>Dataset"]
 
-System["Maranello AI"]
-
-OpenAI["OpenAI API"]
-
-KB["Knowledge Base"]
-
-Dataset["Manufacturing Dataset"]
-
-User -->|"Domande"| System
-
-System -->|"Prompt"| OpenAI
-
-System -->|"Ricerca documentale"| KB
-
-System -->|"Analisi dati"| Dataset
-
-OpenAI -->|"Risposta AI"| System
-
-KB -->|"Documenti rilevanti"| System
-
-Dataset -->|"Risultati analitici"| System
-
-System -->|"Risposta finale"| User
+    User -->|"Natural-language requests<br/>IT / EN"| System
+    System -->|"LLM requests and<br/>tool orchestration"| OpenAI
+    OpenAI -->|"Tool calls and<br/>generated responses"| System
+    System -->|"Document retrieval"| KB
+    KB -->|"Policies and procedures"| System
+    System -->|"Data analysis"| Dataset
+    Dataset -->|"Production and quality data"| System
+    System -->|"Answers, KPIs and charts"| User
 ```
 
 ---
@@ -282,25 +333,36 @@ System -->|"Risposta finale"| User
 
 ## 6.1 Panoramica
 
-L'applicazione è organizzata secondo un'architettura a servizi indipendenti.
+Maranello AI è composto da più componenti con responsabilità separate.
 
-Ogni container svolge una responsabilità specifica e comunica con gli altri mediante API.
+Dal punto di vista del deployment locale, i principali processi applicativi sono:
 
-Questa organizzazione riduce l'accoppiamento tra i componenti e rende il sistema facilmente estendibile.
+1. React Frontend;
+2. Node.js Backend;
+3. Python Data Agent;
+4. ChromaDB.
+
+Il backend Node.js costituisce il punto centrale di orchestrazione e integra internamente sia l'AI Decision Engine sia il modulo RAG.
+
+Il modello linguistico viene fornito attraverso OpenAI API, mentre il Manufacturing Dataset viene letto localmente dal Python Data Agent.
+
+Questa organizzazione permette di mantenere separata l'interfaccia utente, l'orchestrazione AI, il retrieval vettoriale e l'elaborazione analitica.
 
 ---
 
 ## 6.2 Container principali
 
-| Container | Tecnologia | Responsabilità |
-|------------|------------|----------------|
-| Frontend | React | Interfaccia utente |
-| Backend | Node.js + Express | Coordinamento dei servizi |
-| AI Decision Engine | LLM | Classificazione delle richieste e orchestrazione |
-| RAG Engine | LangChain + ChromaDB | Recupero della documentazione |
-| Python Data Agent | FastAPI + Pandas | Analisi del dataset |
-| Vector Database | ChromaDB | Ricerca semantica |
-| Dataset | CSV | Archivio dei dati produttivi |
+| Container / Componente | Tecnologia | Responsabilità |
+|------------------------|------------|----------------|
+| Frontend | React + TypeScript + Vite | Interfaccia conversazionale e rendering delle risposte. |
+| Backend | Node.js + Express + TypeScript | API REST, session management, orchestrazione AI e integrazione dei servizi. |
+| AI Decision Engine | OpenAI SDK + Responses API + Function Calling | Tool selection, tool execution loop e sintesi della risposta. |
+| RAG Module | TypeScript + ChromaDB client + OpenAI embeddings | Retrieval semantico della Knowledge Base. |
+| Vector Database | ChromaDB | Persistenza e ricerca degli embedding documentali. |
+| Python Data Agent | FastAPI + Pandas | Data cleaning, analisi quantitative, KPI e generazione dei grafici. |
+| Manufacturing Dataset | CSV | Sorgente strutturata dei dati di produzione e qualità. |
+
+L'AI Decision Engine e il RAG Module sono componenti logici interni al backend Node.js e non costituiscono processi applicativi indipendenti.
 
 ---
 
@@ -309,81 +371,87 @@ Questa organizzazione riduce l'accoppiamento tra i componenti e rende il sistema
 ```mermaid
 flowchart LR
 
-subgraph Client
+    subgraph Client["Client Layer"]
+        Frontend["React + TypeScript<br/>Frontend"]
+    end
 
-Frontend["React Frontend"]
+    subgraph BackendContainer["Node.js Backend"]
+        API["REST API"]
+        Chat["Chat Service"]
+        Conversation["Conversation Manager"]
+        Decision["AI Decision Engine"]
+        RAG["RAG Module"]
+        ChartProxy["Chart Proxy"]
+    end
 
-end
+    OpenAI["OpenAI API"]
 
-subgraph Backend
+    subgraph DataLayer["Local Services & Data"]
+        Chroma["ChromaDB"]
+        Python["Python Data Agent<br/>FastAPI"]
+        CSV["Manufacturing<br/>Dataset"]
+    end
 
-API["REST API"]
+    Frontend -->|"POST /api/chat"| API
+    API --> Chat
+    Chat --> Conversation
+    Chat --> Decision
 
-Decision["AI Decision Engine"]
+    Decision <--> OpenAI
+    Decision -->|"search_knowledge_base"| RAG
+    RAG <--> Chroma
 
-Response["Response Builder"]
+    Decision -->|"analyze_manufacturing_data"| Python
+    Python --> CSV
 
-end
+    Python -->|"Chart reference"| Decision
+    Decision --> Chat
+    Chat --> API
+    API --> Frontend
 
-subgraph AI
-
-RAG["RAG Engine"]
-
-Python["Python Data Agent"]
-
-end
-
-subgraph Storage
-
-Vector["ChromaDB"]
-
-CSV["Manufacturing Dataset"]
-
-end
-
-Frontend --> API
-
-API --> Decision
-
-Decision --> RAG
-
-Decision --> Python
-
-RAG --> Vector
-
-Python --> CSV
-
-RAG --> Response
-
-Python --> Response
-
-Response --> Frontend
+    Frontend -->|"GET /api/charts/:filename"| ChartProxy
+    ChartProxy -->|"GET /charts/:filename"| Python
+    Python -->|"PNG image"| ChartProxy
+    ChartProxy -->|"PNG image"| Frontend
 ```
 
 ---
 
-## 6.4 Responsabilità dei container
+## 6.4 Responsabilità dei container e componenti
 
-### Frontend
+### React Frontend
 
 Responsabilità:
 
 - visualizzazione della chat;
-- invio delle richieste;
-- visualizzazione di grafici e tabelle;
-- gestione della sessione utente.
+- gestione dello stato dei messaggi;
+- gestione del `sessionId`;
+- invio asincrono delle richieste;
+- visualizzazione dello stato di caricamento;
+- rendering delle risposte testuali;
+- rendering dei grafici restituiti dal backend;
+- gestione degli errori presentabili all'utente.
+
+Il frontend comunica esclusivamente con il backend Node.js e non accede direttamente al Python Data Agent o a ChromaDB.
 
 ---
 
-### Backend
+### Node.js Backend
 
 Responsabilità:
 
-- gestione delle API;
-- coordinamento dei componenti;
-- gestione del contesto conversazionale;
-- aggregazione delle risposte;
-- gestione degli errori.
+- esposizione delle API REST;
+- validazione delle richieste;
+- gestione della sessione conversazionale;
+- coordinamento del modello linguistico;
+- esecuzione del function calling;
+- integrazione con il modulo RAG;
+- comunicazione con il Python Data Agent;
+- aggregazione e restituzione delle risposte;
+- gestione controllata degli errori dei servizi dipendenti;
+- proxy dei grafici generati dal Data Agent.
+
+Il backend rappresenta l'unico punto di ingresso applicativo utilizzato dal frontend.
 
 ---
 
@@ -391,20 +459,43 @@ Responsabilità:
 
 Responsabilità:
 
-- analisi dell'intento;
-- classificazione delle richieste;
-- selezione del flusso di elaborazione;
-- coordinamento dei servizi AI.
+- invio della richiesta al modello linguistico;
+- esposizione delle definizioni dei tool disponibili;
+- interpretazione delle function call generate dal modello;
+- esecuzione di uno o più tool;
+- gestione delle richieste ibride;
+- restituzione degli output dei tool al modello;
+- iterazione fino alla generazione della risposta finale;
+- mantenimento della continuità conversazionale tramite gli identificativi delle risposte del modello.
+
+La selezione dei tool non viene effettuata mediante una classificazione rigida definita nel codice, ma attraverso il meccanismo di function calling del modello linguistico.
 
 ---
 
-### RAG Engine
+### RAG Module
 
 Responsabilità:
 
-- ricerca semantica;
-- recupero dei documenti;
-- preparazione del contesto documentale.
+- generazione dell'embedding della query;
+- ricerca semantica in ChromaDB;
+- recupero dei chunk più rilevanti;
+- recupero dei metadati e delle fonti;
+- preparazione del contesto documentale da restituire all'AI Decision Engine.
+
+Il modulo RAG è implementato all'interno del backend Node.js.
+
+---
+
+### ChromaDB
+
+Responsabilità:
+
+- memorizzazione degli embedding della Knowledge Base;
+- persistenza locale della collection;
+- similarity search;
+- restituzione dei chunk documentali rilevanti e dei relativi metadati.
+
+ChromaDB viene eseguito come servizio locale indipendente.
 
 ---
 
@@ -412,11 +503,39 @@ Responsabilità:
 
 Responsabilità:
 
-- caricamento del dataset;
-- analisi statistica;
+- caricamento del Manufacturing Dataset;
+- data cleaning;
+- interpretazione controllata delle richieste analitiche;
 - calcolo dei KPI;
-- generazione di grafici;
-- produzione di insight.
+- aggregazioni e analisi temporali;
+- generazione dei grafici;
+- salvataggio delle immagini generate;
+- produzione di risultati strutturati e insight narrativi.
+
+Il Data Agent è esposto come microservizio FastAPI e comunica con il backend tramite HTTP REST.
+
+---
+
+### Manufacturing Dataset
+
+Il Manufacturing Dataset costituisce la sorgente dati strutturata del sistema.
+
+Contiene dati sintetici relativi a produzione e qualità, inclusi:
+
+- volumi produttivi;
+- unità difettose;
+- categorie di difetto;
+- rework e scrap;
+- downtime;
+- cycle time;
+- quality score;
+- fornitori;
+- componenti;
+- linee produttive;
+- turni;
+- date di produzione.
+
+Il dataset include intenzionalmente anomalie e dati sporchi utilizzati per validare le capacità di data cleaning del Python Data Agent.
 
 ---
 
@@ -424,27 +543,46 @@ Responsabilità:
 
 ## 7.1 Panoramica
 
-Il backend rappresenta il cuore dell'applicazione.
+Il backend Node.js rappresenta il centro di orchestrazione di Maranello AI.
 
-Ha il compito di coordinare tutti i servizi coinvolti nell'elaborazione delle richieste, mantenere il contesto della conversazione e costruire la risposta finale da restituire all'utente.
+Le sue responsabilità principali sono:
 
-A differenza di una classica applicazione REST, il backend di Maranello AI non contiene la logica di business specifica dei singoli servizi, ma svolge il ruolo di coordinatore tra il frontend, il motore di decisione AI, il sistema RAG e il Python Data Agent.
+- esporre le API utilizzate dal frontend;
+- validare le richieste in ingresso;
+- mantenere il contesto della conversazione;
+- coordinare il modello linguistico;
+- eseguire i tool richiesti dall'LLM;
+- comunicare con ChromaDB;
+- comunicare con il Python Data Agent;
+- restituire risposte testuali e riferimenti ai grafici;
+- gestire in modo controllato eventuali errori dei servizi dipendenti.
+
+Il backend non esegue direttamente l'analisi numerica del Manufacturing Dataset.
+
+Tale responsabilità viene delegata al Python Data Agent.
+
+Allo stesso modo, il frontend non contiene logica di orchestrazione AI e comunica esclusivamente con il backend tramite API REST.
 
 ---
 
 ## 7.2 Architettura interna
 
-Il backend è suddiviso nei seguenti moduli.
+L'implementazione finale del backend è organizzata in moduli con responsabilità distinte.
 
 | Modulo | Responsabilità |
-|---------|----------------|
-| REST API | Espone gli endpoint utilizzati dal frontend. |
-| Conversation Manager | Gestisce il contesto della conversazione. |
-| AI Decision Engine | Analizza la richiesta e decide il flusso di elaborazione. |
-| RAG Connector | Comunica con il motore RAG. |
-| Python Connector | Comunica con il Data Agent. |
-| Response Builder | Costruisce la risposta finale. |
-| Logging Service | Registra eventi, errori e decisioni del sistema. |
+|--------|----------------|
+| REST API Layer | Espone gli endpoint HTTP e valida le richieste. |
+| Chat Service | Coordina il ciclo completo di elaborazione di un messaggio. |
+| Conversation Manager | Gestisce sessioni, cronologia applicativa e identificativi delle risposte OpenAI. |
+| AI Orchestrator | Interagisce con il modello linguistico, gestisce il function calling ed esegue il tool loop. |
+| Tool Definitions | Descrivono al modello gli strumenti disponibili e i relativi parametri. |
+| Tool Executors | Eseguono concretamente le richieste verso RAG e Data Agent. |
+| RAG Module | Esegue retrieval semantico tramite ChromaDB. |
+| Data Agent Client | Comunica con il microservizio Python tramite HTTP REST. |
+| Chart Client / Proxy | Recupera i grafici dal Data Agent e li espone al frontend tramite il backend. |
+| Error Handling Layer | Converte gli errori applicativi e di dipendenza in risposte HTTP controllate. |
+
+Questa organizzazione separa la gestione HTTP, la conversazione, l'orchestrazione AI e l'integrazione con i servizi esterni.
 
 ---
 
@@ -453,123 +591,195 @@ Il backend è suddiviso nei seguenti moduli.
 ```mermaid
 flowchart TD
 
-Request["REST API"]
+    Request["REST API<br/>Chat Controller"]
+    Chat["Chat Service"]
+    Conversation["Conversation Manager"]
+    Orchestrator["AI Orchestrator"]
+    Tools["Tool Definitions"]
+    RAG["RAG Module"]
+    DataClient["Data Agent Client"]
+    ChartProxy["Chart Proxy"]
+    ErrorHandler["Error Handling"]
 
-Conversation["Conversation Manager"]
+    Request --> Chat
+    Chat --> Conversation
+    Chat --> Orchestrator
 
-Decision["AI Decision Engine"]
+    Tools --> Orchestrator
 
-RAG["RAG Connector"]
+    Orchestrator --> RAG
+    Orchestrator --> DataClient
 
-Python["Python Connector"]
+    Orchestrator --> Chat
+    Chat --> Conversation
+    Chat --> Request
 
-Response["Response Builder"]
+    Request --> ErrorHandler
+    DataClient --> ErrorHandler
+    RAG --> ErrorHandler
 
-Logger["Logging Service"]
-
-Request --> Conversation
-
-Conversation --> Decision
-
-Decision --> RAG
-
-Decision --> Python
-
-RAG --> Response
-
-Python --> Response
-
-Response --> Request
-
-Decision --> Logger
-
-RAG --> Logger
-
-Python --> Logger
-
-Response --> Logger
+    ChartProxy --> DataClient
 ```
 
 ---
 
 ## 7.4 Flusso di elaborazione
 
-Ogni richiesta segue il seguente processo:
+Ogni richiesta conversazionale segue il seguente processo:
 
-1. Il frontend invia una richiesta HTTP al backend.
-2. Il backend recupera il contesto della conversazione.
-3. Il Decision Engine analizza la richiesta.
-4. Il sistema determina il tipo di elaborazione necessario.
-5. Vengono invocati uno o più servizi specializzati.
-6. I risultati vengono aggregati.
-7. Il backend costruisce la risposta finale.
-8. La risposta viene restituita al frontend.
-
----
-
-## 7.5 REST API
-
-Responsabilità:
-
-- ricezione delle richieste;
-- validazione dell'input;
-- gestione delle sessioni;
-- inoltro delle richieste al backend;
-- restituzione delle risposte.
+1. Il frontend invia un messaggio tramite `POST /api/chat`.
+2. Il backend valida il contenuto della richiesta.
+3. Il Chat Service identifica o crea la sessione conversazionale.
+4. Il Conversation Manager recupera l'eventuale identificativo della precedente risposta OpenAI.
+5. Il Chat Service inoltra la richiesta all'AI Orchestrator.
+6. L'AI Orchestrator invia il messaggio al modello linguistico insieme alle definizioni dei tool disponibili.
+7. Il modello può:
+   - produrre direttamente una risposta;
+   - invocare `search_knowledge_base`;
+   - invocare `analyze_manufacturing_data`;
+   - invocare più tool nello stesso ciclo.
+8. Il backend esegue i tool richiesti.
+9. Gli output dei tool vengono restituiti al modello.
+10. Il ciclo continua fino a quando il modello produce una risposta finale.
+11. Il Chat Service aggiorna la sessione conversazionale.
+12. La risposta viene restituita al frontend.
 
 ---
 
-## 7.6 Conversation Manager
+## 7.5 REST API Layer
 
-Responsabilità:
+Il backend espone gli endpoint necessari all'interazione con il frontend e al recupero dei grafici.
 
-- mantenimento del contesto;
-- gestione della cronologia;
-- preparazione del prompt;
-- recupero dei messaggi precedenti.
+Tra le responsabilità principali:
 
-Il Conversation Manager permette all'AI di comprendere richieste dipendenti dal contesto, come ad esempio:
+- ricezione delle richieste HTTP;
+- validazione degli input;
+- estrazione del `sessionId`;
+- invocazione del Chat Service;
+- trasformazione degli errori in risposte HTTP;
+- restituzione dei risultati in formato JSON;
+- proxy delle immagini generate dal Data Agent.
 
-> "Mostrami anche il grafico."
+L'endpoint principale della conversazione è:
 
-oppure
+```text
+POST /api/chat
+```
 
-> "Approfondisci il secondo punto."
+Il backend espone inoltre il recupero dei grafici attraverso:
 
-senza che l'utente debba ripetere tutte le informazioni.
-
----
-
-## 7.7 Response Builder
-
-Il Response Builder rappresenta l'ultimo componente della pipeline.
-
-Riceve gli output provenienti dai diversi servizi e costruisce una risposta unica, coerente e pronta per essere visualizzata nell'interfaccia conversazionale.
-
-Può combinare:
-
-- testo;
-- grafici;
-- tabelle;
-- KPI;
-- riferimenti documentali;
-- metadati.
+```text
+GET /api/charts/:filename
+```
 
 ---
 
-## 7.8 Logging Service
+## 7.6 Chat Service
 
-Il Logging Service registra le principali informazioni di esecuzione del sistema.
+Il Chat Service costituisce il coordinatore applicativo della singola richiesta.
 
-Tra queste:
+Le sue responsabilità comprendono:
 
-- timestamp della richiesta;
-- componente selezionato;
-- tempo di elaborazione;
-- eventuali errori;
-- stato della risposta.
+- creazione o recupero della sessione;
+- recupero del contesto conversazionale;
+- invocazione dell'AI Orchestrator;
+- persistenza dei messaggi della conversazione;
+- memorizzazione dell'identificativo della risposta OpenAI;
+- conversione dei riferimenti ai grafici in URL esposti dal backend;
+- costruzione del risultato restituito al controller.
 
-La registrazione di queste informazioni facilita il debugging, il monitoraggio e l'analisi delle prestazioni del sistema.
+La persistenza della conversazione viene effettuata solamente dopo il completamento corretto dell'elaborazione.
+
+Questo comportamento evita di registrare nello stato della sessione interazioni incomplete dovute a errori dei servizi dipendenti.
+
+---
+
+## 7.7 Conversation Manager
+
+Il Conversation Manager mantiene lo stato conversazionale in memoria per ciascuna sessione.
+
+Ogni sessione contiene:
+
+- identificativo univoco;
+- cronologia dei messaggi applicativi;
+- identificativo dell'ultima risposta OpenAI;
+- informazioni necessarie alla continuazione del contesto.
+
+Le sessioni vengono identificate attraverso UUID generati dal backend.
+
+La continuità conversazionale viene gestita su due livelli:
+
+1. cronologia applicativa mantenuta dal backend;
+2. continuazione del contesto OpenAI tramite l'identificativo della precedente risposta.
+
+Questo permette al sistema di comprendere richieste contestuali come:
+
+> "E se invece il suo tasso aumentasse al 4,2%?"
+
+anche quando il referente, ad esempio un fornitore, è stato menzionato in un messaggio precedente.
+
+---
+
+## 7.8 Data Agent Client
+
+Il Data Agent Client gestisce la comunicazione tra il backend Node.js e il Python Data Agent.
+
+La comunicazione avviene tramite HTTP REST.
+
+Il client:
+
+- invia la domanda analitica al Data Agent;
+- riceve risultati numerici;
+- riceve insight narrativi;
+- riceve eventuali riferimenti ai grafici generati;
+- gestisce errori di connessione e risposte non valide.
+
+L'indisponibilità del Data Agent viene gestita dal backend come errore di dipendenza e restituita al frontend mediante una risposta HTTP controllata.
+
+---
+
+## 7.9 Chart Proxy
+
+I grafici vengono generati e salvati dal Python Data Agent.
+
+Il frontend non comunica direttamente con il servizio Python.
+
+Quando deve visualizzare un'immagine, utilizza il backend Node.js:
+
+```text
+Frontend
+   |
+   | GET /api/charts/:filename
+   v
+Node.js Backend
+   |
+   | GET /charts/:filename
+   v
+Python Data Agent
+```
+
+Il backend recupera il file dal Data Agent e lo inoltra al frontend.
+
+Questa scelta mantiene un unico punto di accesso applicativo e impedisce al frontend di dipendere direttamente dalla topologia interna dei servizi.
+
+Il nome del file richiesto viene validato prima dell'inoltro per impedire richieste di path non consentiti.
+
+---
+
+## 7.10 Error Handling
+
+Il backend distingue tra errori di validazione, errori delle dipendenze e errori imprevisti.
+
+Tra i casi gestiti esplicitamente:
+
+- messaggio vuoto o non valido;
+- indisponibilità del Python Data Agent;
+- indisponibilità di ChromaDB;
+- errori nella generazione o nel recupero dei grafici.
+
+Quando una dipendenza necessaria non è disponibile, il backend restituisce una risposta HTTP `503 Service Unavailable` con un messaggio comprensibile per il frontend.
+
+Gli errori non riconosciuti vengono delegati al middleware centralizzato di Express.
 
 ---
 
@@ -577,197 +787,223 @@ La registrazione di queste informazioni facilita il debugging, il monitoraggio e
 
 ## 8.1 Panoramica
 
-L'AI Decision Engine rappresenta il componente centrale dell'intera architettura di Maranello AI.
+L'AI Decision Engine rappresenta il componente centrale dell'orchestrazione di Maranello AI.
 
-Il suo compito non è solamente interrogare un Large Language Model, ma analizzare ogni richiesta dell'utente, comprenderne l'obiettivo e coordinare il processo di elaborazione più appropriato.
+Nell'implementazione finale non viene utilizzato un classificatore separato basato su categorie rigide.
 
-Questo approccio consente di separare la logica decisionale dalla logica applicativa, rendendo il sistema più modulare, estendibile e facilmente manutenibile.
+La scelta degli strumenti viene invece delegata direttamente al Large Language Model attraverso il meccanismo di **function calling**.
 
-Il Decision Engine costituisce il punto di ingresso di tutte le richieste elaborate dal backend.
+Il Decision Engine utilizza l'OpenAI SDK e la Responses API per:
 
----
+- comprendere la richiesta dell'utente;
+- mantenere il contesto conversazionale;
+- selezionare uno o più tool;
+- ricevere gli output dei tool;
+- continuare il processo di ragionamento;
+- generare la risposta finale.
 
-## 8.2 Responsabilità
-
-Le principali responsabilità del Decision Engine sono:
-
-- analizzare la richiesta dell'utente;
-- identificare l'intento della conversazione;
-- determinare il tipo di elaborazione richiesta;
-- selezionare gli strumenti più appropriati;
-- coordinare l'esecuzione dei servizi;
-- sintetizzare le informazioni ottenute;
-- restituire una risposta coerente al backend.
+Questo approccio permette di realizzare il comportamento agentico richiesto dal progetto senza introdurre un routing deterministico basato esclusivamente su keyword o regole statiche.
 
 ---
 
-## 8.3 Architettura interna
+## 8.2 Tool disponibili
 
-Il Decision Engine è composto da quattro moduli principali.
+Il modello dispone di due strumenti principali.
 
-| Modulo | Responsabilità |
-|----------|----------------|
-| Intent Analyzer | Analizza la richiesta dell'utente e identifica l'obiettivo della conversazione. |
-| Tool Router | Seleziona i servizi da utilizzare. |
-| Execution Manager | Coordina l'esecuzione dei servizi selezionati. |
-| Response Synthesizer | Integra i risultati e produce una risposta unificata. |
+### `search_knowledge_base`
 
----
+Utilizzato per recuperare informazioni dalla documentazione aziendale.
 
-## 8.4 Component Diagram
+Lo strumento viene invocato quando la richiesta riguarda, ad esempio:
 
-```mermaid
-flowchart TD
-
-Request["User Request"]
-
-Intent["Intent Analyzer"]
-
-Router["Tool Router"]
-
-Execution["Execution Manager"]
-
-Synth["Response Synthesizer"]
-
-Response["Final Response"]
-
-Request --> Intent
-
-Intent --> Router
-
-Router --> Execution
-
-Execution --> Synth
-
-Synth --> Response
-```
+- policy;
+- procedure;
+- soglie operative;
+- escalation;
+- supplier quality;
+- non conformità;
+- rework e scrap.
 
 ---
 
-## 8.5 Intent Analyzer
+### `analyze_manufacturing_data`
 
-L'Intent Analyzer rappresenta il primo livello di elaborazione.
+Utilizzato per effettuare analisi quantitative sul Manufacturing Dataset.
 
-Il suo obiettivo è comprendere il significato della richiesta indipendentemente dalla lingua utilizzata.
+Lo strumento viene invocato quando la richiesta richiede, ad esempio:
 
-Le principali attività comprendono:
-
-- identificazione dell'intento;
-- riconoscimento della lingua;
-- individuazione delle entità principali;
-- analisi del contesto conversazionale;
-- classificazione della richiesta.
-
----
-
-## 8.6 Classificazione delle richieste
-
-Ogni richiesta viene classificata in una delle seguenti categorie.
-
-| Categoria | Descrizione |
-|------------|-------------|
-| Documentale | Consultazione della Knowledge Base. |
-| Analitica | Analisi del dataset. |
-| Ibrida | Richiede sia documentazione sia dati. |
-| Conversazionale | Richieste generiche gestite direttamente dall'LLM. |
-
----
-
-## 8.7 Tool Router
-
-Il Tool Router riceve la categoria individuata dall'Intent Analyzer e determina quali componenti devono essere coinvolti.
-
-Le decisioni possibili sono:
-
-| Tipo richiesta | Servizio |
-|----------------|----------|
-| Documentale | RAG Engine |
-| Analitica | Python Data Agent |
-| Ibrida | RAG + Data Agent |
-| Conversazionale | LLM |
-
-Il Tool Router rappresenta il punto di separazione tra la logica decisionale e l'esecuzione tecnica dei servizi.
-
----
-
-## 8.8 Routing Decision Diagram
-
-```mermaid
-flowchart TD
-
-Start["Nuova richiesta"]
-
-Intent["Intent Analyzer"]
-
-Doc["Documentale"]
-
-Data["Analitica"]
-
-Hybrid["Ibrida"]
-
-Chat["Conversazionale"]
-
-RAG["RAG Engine"]
-
-Python["Python Data Agent"]
-
-LLM["LLM"]
-
-Start --> Intent
-
-Intent --> Doc
-
-Intent --> Data
-
-Intent --> Hybrid
-
-Intent --> Chat
-
-Doc --> RAG
-
-Data --> Python
-
-Hybrid --> RAG
-
-Hybrid --> Python
-
-Chat --> LLM
-```
-
----
-
-## 8.9 Execution Manager
-
-L'Execution Manager coordina l'esecuzione dei servizi selezionati.
-
-Le sue responsabilità comprendono:
-
-- avvio dei servizi;
-- gestione delle chiamate API;
-- sincronizzazione delle risposte;
-- gestione dei timeout;
-- raccolta dei risultati.
-
-Nel caso di richieste ibride, il componente coordina l'esecuzione sia del motore RAG sia del Python Data Agent prima di procedere alla fase successiva.
-
----
-
-## 8.10 Response Synthesizer
-
-Il Response Synthesizer rappresenta l'ultimo stadio del Decision Engine.
-
-Riceve gli output provenienti dai diversi componenti e costruisce una risposta coerente.
-
-Può integrare:
-
-- testo descrittivo;
-- riferimenti documentali;
-- risultati numerici;
 - KPI;
-- grafici;
-- tabelle.
+- defect rate;
+- confronti tra linee produttive;
+- analisi per turno;
+- analisi per fornitore;
+- analisi per componente;
+- trend temporali;
+- generazione di grafici.
 
-L'obiettivo è fornire all'utente un'unica risposta completa, indipendentemente dal numero di servizi coinvolti nell'elaborazione.
+---
+
+## 8.3 Tool Selection
+
+La selezione dei tool viene effettuata autonomamente dal modello linguistico.
+
+Le possibili strategie sono:
+
+| Tipo di richiesta | Comportamento |
+|-------------------|---------------|
+| Documentale | Invocazione di `search_knowledge_base`. |
+| Analitica | Invocazione di `analyze_manufacturing_data`. |
+| Ibrida | Invocazione di entrambi i tool. |
+| Conversazionale | Nessun tool obbligatorio. |
+
+Queste categorie descrivono il comportamento osservabile del sistema, ma non vengono implementate attraverso un classificatore separato nel codice.
+
+La decisione emerge direttamente dal processo di function calling.
+
+---
+
+## 8.4 Tool Definitions
+
+Ogni tool viene descritto al modello tramite:
+
+- nome;
+- descrizione;
+- parametri accettati;
+- JSON Schema;
+- vincoli di validazione.
+
+Le definizioni sono progettate per guidare il modello verso l'utilizzo corretto degli strumenti.
+
+Particolare attenzione viene posta alla conservazione dello scope originale della richiesta.
+
+Il modello viene istruito a non introdurre autonomamente:
+
+- periodi temporali non richiesti;
+- dimensioni di raggruppamento aggiuntive;
+- filtri non presenti nella domanda dell'utente.
+
+Questo riduce il rischio che una richiesta valida venga trasformata in un'analisi non supportata dal Data Agent.
+
+---
+
+## 8.5 Agentic Tool Loop
+
+L'orchestrazione segue un ciclo iterativo.
+
+```mermaid
+flowchart TD
+
+    Start["User Message"]
+    Model["OpenAI Responses API"]
+    Check{"Tool call?"}
+    Execute["Execute requested tool(s)"]
+    Results["Return function_call_output"]
+    Final["Final Answer"]
+
+    Start --> Model
+    Model --> Check
+
+    Check -->|"No"| Final
+    Check -->|"Yes"| Execute
+
+    Execute --> Results
+    Results --> Model
+```
+
+Il processo termina solamente quando il modello produce una risposta finale priva di ulteriori function call.
+
+---
+
+## 8.6 Esecuzione dei tool
+
+Quando il modello restituisce una function call, l'AI Orchestrator:
+
+1. identifica il tool richiesto;
+2. valida gli argomenti;
+3. invoca l'executor associato;
+4. raccoglie l'output;
+5. restituisce il risultato al modello come `function_call_output`.
+
+Se vengono richiesti più tool nello stesso ciclo, gli executor possono essere avviati in parallelo.
+
+Questo comportamento è particolarmente utile nelle richieste ibride, nelle quali documentazione e analisi numerica sono indipendenti e possono essere recuperate simultaneamente.
+
+---
+
+## 8.7 Richieste ibride
+
+Una richiesta ibrida combina informazioni quantitative e documentali.
+
+Esempio:
+
+> "Quale fornitore ha il tasso di difettosità più alto e, secondo la Supplier Quality Procedure, quale azione deve essere intrapresa?"
+
+In questo caso il modello può invocare:
+
+```text
+analyze_manufacturing_data
+search_knowledge_base
+```
+
+Il Data Agent determina il fornitore con il defect rate più elevato, mentre il RAG recupera la procedura aziendale applicabile.
+
+I due risultati vengono successivamente restituiti al modello, che costruisce una risposta unica.
+
+---
+
+## 8.8 Conversation Continuation
+
+Per mantenere la continuità della conversazione, il backend conserva l'identificativo dell'ultima risposta del modello.
+
+Le richieste successive possono essere inviate utilizzando tale riferimento, permettendo alla Responses API di proseguire la stessa conversazione.
+
+Questo meccanismo consente di mantenere riferimenti semantici tra turni consecutivi.
+
+Ad esempio:
+
+```text
+Utente:
+Which supplier has the highest defect rate?
+
+Utente:
+What would happen if that supplier's defect rate increased to 3.2%?
+```
+
+Il sistema è in grado di comprendere che `that supplier` si riferisce al fornitore identificato nel turno precedente.
+
+La continuità viene mantenuta anche quando la lingua cambia nel corso della stessa sessione.
+
+---
+
+## 8.9 Supporto multilingua
+
+Il Decision Engine è progettato per gestire richieste in italiano e inglese.
+
+Il modello viene istruito a rispondere nella stessa lingua utilizzata dall'utente.
+
+Il supporto multilingua riguarda:
+
+- comprensione della richiesta;
+- selezione dei tool;
+- retrieval della Knowledge Base;
+- sintesi degli output;
+- mantenimento del contesto conversazionale.
+
+La Knowledge Base è scritta in inglese, ma il sistema supporta query in italiano grazie all'utilizzo di embedding semantici adatti al retrieval cross-language.
+
+---
+
+## 8.10 Controllo del ciclo agentico
+
+Per evitare esecuzioni indefinite, l'AI Orchestrator applica un limite massimo al numero di cicli di tool execution.
+
+Il limite costituisce una misura di sicurezza applicativa e impedisce che il modello generi una sequenza non terminante di function call.
+
+Il processo può quindi terminare in uno dei seguenti modi:
+
+- risposta finale prodotta dal modello;
+- errore di uno dei tool;
+- raggiungimento del limite massimo di iterazioni.
 
 ---
 
@@ -776,48 +1012,79 @@ L'obiettivo è fornire all'utente un'unica risposta completa, indipendentemente 
 ```mermaid
 sequenceDiagram
 
-participant User
-participant Backend
-participant DecisionEngine
-participant RAG
-participant DataAgent
+    participant User
+    participant Frontend
+    participant Backend
+    participant OpenAI
+    participant RAG
+    participant DataAgent
 
-User->>Backend: Richiesta
+    User->>Frontend: Natural-language request
+    Frontend->>Backend: POST /api/chat
+    Backend->>OpenAI: Message + tool definitions
 
-Backend->>DecisionEngine: Analisi richiesta
+    alt Direct response
+        OpenAI-->>Backend: Final answer
+    else Knowledge Base tool call
+        OpenAI-->>Backend: search_knowledge_base
+        Backend->>RAG: Semantic retrieval
+        RAG-->>Backend: Relevant chunks + sources
+        Backend->>OpenAI: function_call_output
+        OpenAI-->>Backend: Final answer
+    else Data analysis tool call
+        OpenAI-->>Backend: analyze_manufacturing_data
+        Backend->>DataAgent: Analysis request
+        DataAgent-->>Backend: Metrics + insight + chart reference
+        Backend->>OpenAI: function_call_output
+        OpenAI-->>Backend: Final answer
+    else Hybrid request
+        OpenAI-->>Backend: Multiple tool calls
+        par Knowledge retrieval
+            Backend->>RAG: Semantic retrieval
+            RAG-->>Backend: Relevant chunks + sources
+        and Data analysis
+            Backend->>DataAgent: Analysis request
+            DataAgent-->>Backend: Metrics + insight + chart reference
+        end
+        Backend->>OpenAI: Tool outputs
+        OpenAI-->>Backend: Final synthesized answer
+    end
 
-DecisionEngine->>DecisionEngine: Intent Detection
-
-DecisionEngine->>DecisionEngine: Tool Selection
-
-alt Richiesta documentale
-
-DecisionEngine->>RAG: Query documentale
-
-RAG-->>DecisionEngine: Documenti
-
-else Richiesta analitica
-
-DecisionEngine->>DataAgent: Analisi dati
-
-DataAgent-->>DecisionEngine: KPI e grafici
-
-else Richiesta ibrida
-
-DecisionEngine->>RAG: Query
-
-DecisionEngine->>DataAgent: Analisi
-
-RAG-->>DecisionEngine: Documenti
-
-DataAgent-->>DecisionEngine: Risultati
-
-end
-
-DecisionEngine->>Backend: Risposta sintetizzata
-
-Backend-->>User: Risposta finale
+    Backend-->>Frontend: JSON response
+    Frontend-->>User: Text and optional chart
 ```
+
+---
+
+## 8.12 Principi di orchestrazione
+
+L'AI Decision Engine segue alcuni principi fondamentali.
+
+### Tool-grounded responses
+
+Quando una richiesta riguarda dati aziendali o procedure interne, il modello deve utilizzare i tool disponibili invece di inventare informazioni.
+
+### Scope preservation
+
+Le richieste inviate ai tool devono mantenere lo scope definito dall'utente.
+
+### Source-aware generation
+
+Le risposte documentali devono utilizzare le informazioni recuperate dalla Knowledge Base e riportare, quando disponibile, il documento o la sezione di riferimento.
+
+### Deterministic analytics
+
+Il modello decide **quando** utilizzare il Data Agent, ma non esegue direttamente codice Python arbitrario.
+
+L'analisi viene demandata al microservizio Python, che applica operazioni analitiche controllate e testabili.
+
+### Language consistency
+
+La risposta finale deve mantenere la lingua della richiesta dell'utente.
+
+### Failure isolation
+
+Un errore di un servizio specializzato viene gestito senza compromettere l'intero processo backend.
 
 ---
 
@@ -825,23 +1092,25 @@ Backend-->>User: Risposta finale
 
 ## 9.1 Panoramica
 
-Il motore Retrieval-Augmented Generation (RAG) è responsabile della gestione della documentazione aziendale.
+Il modulo Retrieval-Augmented Generation (RAG) è responsabile del recupero delle informazioni contenute nella Knowledge Base aziendale.
 
-Il suo obiettivo è recuperare le informazioni più pertinenti dalla Knowledge Base e fornirle al Decision Engine come contesto per la generazione della risposta.
+Il suo obiettivo è fornire all'AI Decision Engine contesto documentale affidabile e pertinente, in modo che le risposte relative a policy, procedure e regole operative siano basate sui documenti disponibili anziché sulla sola conoscenza generale del modello linguistico.
 
-Questo approccio riduce il rischio di allucinazioni del modello linguistico e garantisce che le risposte relative alle procedure aziendali siano basate esclusivamente sulla documentazione disponibile.
+Il RAG è implementato all'interno del backend Node.js e utilizza ChromaDB come database vettoriale locale.
 
 ---
 
 ## 9.2 Responsabilità
 
-Il motore RAG è responsabile di:
+Il modulo RAG è responsabile di:
 
-- interrogare la Knowledge Base;
-- effettuare ricerche semantiche;
-- recuperare i documenti più pertinenti;
-- preparare il contesto documentale;
-- fornire le fonti utilizzate.
+- ricevere una query documentale;
+- generare l'embedding semantico della query;
+- interrogare la collection ChromaDB;
+- recuperare i chunk più rilevanti;
+- recuperare i relativi metadati;
+- preservare le informazioni sulle fonti;
+- restituire il contesto documentale all'AI Decision Engine.
 
 ---
 
@@ -850,76 +1119,160 @@ Il motore RAG è responsabile di:
 ```mermaid
 flowchart LR
 
-Query["Query"]
+    Query["User Query"]
+    Embed["OpenAI Embedding Model"]
+    Chroma["ChromaDB"]
+    Collection["maranello_ai_knowledge_base"]
+    Chunks["Relevant Document Chunks"]
+    Metadata["Source Metadata"]
+    Context["RAG Context"]
 
-Embedding["Embedding Model"]
-
-VectorDB["ChromaDB"]
-
-Documents["Knowledge Base"]
-
-Context["Document Context"]
-
-Query --> Embedding
-
-Embedding --> VectorDB
-
-VectorDB --> Documents
-
-Documents --> Context
+    Query --> Embed
+    Embed --> Chroma
+    Chroma --> Collection
+    Collection --> Chunks
+    Collection --> Metadata
+    Chunks --> Context
+    Metadata --> Context
 ```
 
 ---
 
 ## 9.4 Pipeline di elaborazione
 
-Il motore RAG segue il seguente flusso operativo:
+Il modulo RAG segue il seguente flusso:
 
-1. Ricezione della query.
-2. Conversione della query in embedding vettoriali.
-3. Ricerca semantica nel Vector Database.
-4. Recupero dei documenti più rilevanti.
-5. Preparazione del contesto.
-6. Invio del contesto al Decision Engine.
-
----
-
-## 9.5 ChromaDB
-
-ChromaDB è utilizzato come Vector Database per memorizzare gli embedding dei documenti della Knowledge Base.
-
-L'utilizzo di un database vettoriale permette di eseguire ricerche basate sul significato della richiesta piuttosto che sulla semplice corrispondenza di parole chiave.
+1. ricezione della query dal tool `search_knowledge_base`;
+2. generazione dell'embedding della query;
+3. invio della ricerca a ChromaDB;
+4. similarity search sulla collection della Knowledge Base;
+5. recupero dei chunk documentali più rilevanti;
+6. recupero dei metadati associati;
+7. costruzione del contesto documentale;
+8. restituzione del risultato all'AI Decision Engine;
+9. utilizzo del contesto da parte del modello linguistico per generare la risposta finale.
 
 ---
 
-## 9.6 Knowledge Base
+## 9.5 Embedding Model
 
-La Knowledge Base contiene documentazione relativa ai processi di Quality & Manufacturing Operations.
+Il sistema utilizza:
 
-Tra i documenti previsti:
+```text
+text-embedding-3-small
+```
 
-- procedure operative;
-- istruzioni di lavoro;
-- policy aziendali;
-- documentazione qualità;
+come modello di embedding.
+
+Questa scelta è stata adottata dopo una fase di validazione del retrieval.
+
+Una soluzione iniziale basata su embedding locali non garantiva una qualità sufficientemente stabile per le query in italiano rivolte a documentazione scritta in inglese.
+
+L'utilizzo degli embedding OpenAI ha migliorato il retrieval cross-language, permettendo al sistema di recuperare correttamente sezioni rilevanti della Knowledge Base anche quando la lingua della query differisce da quella dei documenti.
+
+---
+
+## 9.6 ChromaDB
+
+ChromaDB viene utilizzato come Vector Database locale.
+
+La collection principale del progetto è:
+
+```text
+maranello_ai_knowledge_base
+```
+
+La collection contiene i chunk prodotti durante l'indicizzazione dei documenti della Knowledge Base.
+
+Il database vettoriale permette di effettuare ricerca semantica basata sulla similarità tra embedding, superando i limiti di una ricerca puramente lessicale.
+
+ChromaDB viene eseguito come servizio locale indipendente e viene interrogato dal backend Node.js.
+
+---
+
+## 9.7 Knowledge Base
+
+La Knowledge Base è composta da documentazione aziendale fittizia relativa al reparto **Quality & Manufacturing Operations**.
+
+I documenti implementati sono:
+
+- `manufacturing_quality_policy.md`
+- `non_conformity_procedure.md`
+- `supplier_quality_procedure.md`
+- `rework_and_scrap_procedure.md`
+- `production_escalation_policy.md`
+
+I contenuti sono stati progettati specificamente per il progetto e non rappresentano documentazione ufficiale di aziende reali.
+
+La Knowledge Base copre, tra gli altri, i seguenti ambiti:
+
+- soglie di defect rate;
+- livelli di warning e critical;
 - gestione delle non conformità;
 - supplier quality;
-- CAPA;
-- audit;
-- controlli di processo.
+- rework e scrap;
+- escalation produttiva;
+- responsabilità operative;
+- criteri di monitoraggio e intervento.
 
 ---
 
-## 9.7 Output del RAG
+## 9.8 Indicizzazione
 
-Il motore restituisce:
+I documenti vengono suddivisi in chunk prima dell'inserimento nel Vector Database.
 
-- documenti rilevanti;
-- riferimenti alle fonti;
-- metadati dei documenti;
-- contesto testuale.
+La configurazione attuale produce complessivamente:
 
-Tali informazioni vengono utilizzate dal Decision Engine per costruire la risposta finale.
+```text
+5 documents
+149 chunks
+```
+
+Ogni chunk viene associato a metadati che permettono di preservare il riferimento alla sorgente originale.
+
+Questo consente all'AI Decision Engine di includere nella risposta riferimenti al documento o alla sezione utilizzata.
+
+---
+
+## 9.9 Retrieval multilingua
+
+La Knowledge Base è scritta in inglese.
+
+L'interfaccia conversazionale supporta tuttavia richieste sia in inglese sia in italiano.
+
+Il retrieval cross-language permette quindi scenari come:
+
+```text
+Qual è la soglia critica del defect rate?
+```
+
+anche quando la sezione rilevante della Knowledge Base è disponibile esclusivamente in inglese.
+
+Il sistema restituisce il contesto documentale recuperato al modello linguistico, che produce la risposta finale nella lingua della richiesta dell'utente.
+
+---
+
+## 9.10 Output del RAG
+
+Il risultato del tool RAG contiene informazioni utili alla generazione della risposta, tra cui:
+
+- contenuto dei chunk rilevanti;
+- identificazione della sorgente;
+- sezione documentale, quando disponibile;
+- metadati associati;
+- contesto testuale aggregato.
+
+Queste informazioni permettono al modello di generare risposte grounded nella Knowledge Base.
+
+---
+
+## 9.11 Vincoli del RAG
+
+Il modulo RAG non deve essere utilizzato come fonte per calcolare KPI o statistiche del Manufacturing Dataset.
+
+Allo stesso modo, il modello non deve inventare policy aziendali quando la documentazione disponibile non supporta una determinata affermazione.
+
+La separazione tra retrieval documentale e analisi quantitativa costituisce uno dei principi fondamentali dell'architettura ibrida.
 
 ---
 
@@ -927,11 +1280,13 @@ Tali informazioni vengono utilizzate dal Decision Engine per costruire la rispos
 
 ## 10.1 Panoramica
 
-Il Python Data Agent è il componente dedicato all'analisi dei dati produttivi.
+Il Python Data Agent è il microservizio responsabile dell'analisi quantitativa del Manufacturing Dataset.
 
-A differenza del motore RAG, il suo obiettivo non è recuperare documentazione, ma elaborare dati strutturati e produrre analisi statistiche, KPI e visualizzazioni.
+È implementato tramite FastAPI e utilizza Pandas per il caricamento, la pulizia e l'elaborazione dei dati.
 
-Il Data Agent è implementato come microservizio indipendente basato su FastAPI.
+Il Data Agent non decide autonomamente quando essere utilizzato.
+
+La decisione viene presa dall'AI Decision Engine del backend Node.js, che invoca il tool `analyze_manufacturing_data` quando una richiesta richiede analisi numeriche.
 
 ---
 
@@ -939,130 +1294,290 @@ Il Data Agent è implementato come microservizio indipendente basato su FastAPI.
 
 Il Python Data Agent è responsabile di:
 
-- caricamento del dataset;
-- validazione dei dati;
-- pulizia del dataset;
-- analisi statistica;
-- calcolo dei KPI;
+- caricamento del dataset CSV;
+- normalizzazione dei dati;
+- gestione dei valori mancanti;
+- rimozione dei duplicati;
+- identificazione e gestione di valori non validi;
+- calcolo di KPI;
+- aggregazioni per dimensione;
+- analisi temporali;
 - generazione di grafici;
-- produzione di insight.
+- salvataggio delle immagini;
+- restituzione di risultati strutturati;
+- produzione di insight narrativi.
 
 ---
 
-## 10.3 Pipeline del Data Agent
+## 10.3 Architettura del Data Agent
 
 ```mermaid
 flowchart LR
 
-CSV["Dataset CSV"]
+    Request["Analysis Request"]
+    Interpreter["Question Interpreter"]
+    Loader["Dataset Loader"]
+    Cleaner["Data Cleaner"]
+    Analytics["Analytics Engine"]
+    Chart["Chart Generator"]
+    Insight["Narrative Insight"]
+    Response["Structured Response"]
 
-Load["Data Loading"]
-
-Clean["Data Preparation"]
-
-Analysis["Analytics Engine"]
-
-Charts["Charts"]
-
-Insights["Insights"]
-
-CSV --> Load
-
-Load --> Clean
-
-Clean --> Analysis
-
-Analysis --> Charts
-
-Analysis --> Insights
+    Request --> Interpreter
+    Interpreter --> Loader
+    Loader --> Cleaner
+    Cleaner --> Analytics
+    Analytics --> Chart
+    Analytics --> Insight
+    Chart --> Response
+    Insight --> Response
 ```
 
 ---
 
-## 10.4 Fasi di elaborazione
+## 10.4 API del Data Agent
 
-Il processo di analisi è composto dalle seguenti fasi.
+Il Data Agent espone un'API REST tramite FastAPI.
 
-### Data Loading
+Gli endpoint principali sono:
 
-Il dataset viene caricato automaticamente utilizzando Pandas.
+```text
+GET /
+GET /health
+POST /api/analysis
+GET /charts/:filename
+```
 
----
+`POST /api/analysis` rappresenta l'endpoint principale utilizzato dal backend Node.js.
 
-### Data Preparation
+La richiesta contiene la domanda analitica da interpretare.
 
-Durante questa fase vengono:
+La risposta può contenere:
 
-- verificati i tipi di dato;
-- gestiti eventuali valori mancanti;
-- eliminati duplicati;
-- controllata la qualità del dataset.
-
----
-
-### Analytics Engine
-
-L'Analytics Engine produce:
-
-- statistiche descrittive;
-- confronti;
-- indicatori di performance;
-- aggregazioni;
-- analisi temporali.
+- metriche;
+- risultati aggregati;
+- insight narrativi;
+- riferimenti al grafico generato.
 
 ---
 
-### Visualization Engine
+## 10.5 Data Loading
 
-Il sistema genera automaticamente grafici quali:
+Il dataset viene caricato tramite Pandas.
 
-- bar chart;
-- line chart;
-- pie chart;
-- histogram;
-- scatter plot.
+Ogni riga rappresenta un batch produttivo e contiene informazioni relative a:
 
-I grafici vengono restituiti direttamente al frontend.
-
----
-
-### Insight Generation
-
-L'ultima fase consiste nella trasformazione dei risultati numerici in una spiegazione testuale facilmente comprensibile.
-
-Gli insight vengono successivamente integrati dal Decision Engine nella risposta finale.
-
----
-
-## 10.5 Comunicazione con il backend
-
-Il Data Agent comunica con il backend mediante API REST.
-
-Ogni richiesta contiene:
-
-- identificativo della sessione;
-- richiesta dell'utente;
-- eventuali parametri di analisi.
-
-Il Data Agent restituisce:
-
-- risultati numerici;
-- grafici;
-- tabelle;
-- insight testuali.
+- data di produzione;
+- plant;
+- production line;
+- vehicle model;
+- shift;
+- unità prodotte;
+- unità difettose;
+- rework;
+- scrap;
+- downtime;
+- cycle time;
+- quality score;
+- supplier;
+- component category;
+- inspection status;
+- operator team.
 
 ---
 
-## 10.6 Vantaggi dell'architettura
+## 10.6 Data Cleaning
 
-L'utilizzo di un microservizio Python separato offre numerosi vantaggi:
+Il Manufacturing Dataset contiene intenzionalmente anomalie utilizzate per validare il processo di pulizia.
 
+Tra le anomalie presenti:
+
+- righe duplicate;
+- valori mancanti;
+- formati data incoerenti;
+- etichette testuali non normalizzate;
+- quality score fuori range;
+- relazioni numeriche non valide;
+- outlier di downtime;
+- outlier di cycle time.
+
+Il Data Agent applica operazioni controllate di cleaning prima dell'esecuzione delle analisi.
+
+Tra le operazioni principali:
+
+- rimozione dei duplicati;
+- normalizzazione dei valori categorici;
+- parsing delle date;
+- gestione dei valori numerici non validi;
+- preservazione dei valori mancanti quando la loro imputazione non è giustificata;
+- esclusione o segnalazione dei record incompatibili con specifiche analisi.
+
+---
+
+## 10.7 Question Interpreter
+
+L'interpretazione delle richieste analitiche viene effettuata da un componente deterministico.
+
+Il Question Interpreter riconosce lo scope della richiesta e la associa a una delle analisi supportate.
+
+Le principali categorie implementate sono:
+
+- KPI globali;
+- defect rate per production line;
+- defect rate per shift;
+- defect rate per supplier;
+- defect rate per component category;
+- defect rate per vehicle model;
+- defect rate per plant;
+- defect rate per operator team;
+- monthly defect rate trend.
+
+L'interprete supporta richieste in italiano e inglese.
+
+---
+
+## 10.8 Scelta di un approccio deterministico
+
+Il Data Agent non esegue codice Python arbitrario generato dal modello linguistico.
+
+Il backend utilizza l'LLM per decidere **quando** delegare una richiesta al Data Agent, mentre il microservizio Python determina **come** eseguire l'analisi utilizzando operazioni predefinite e testate.
+
+Questa decisione architetturale è stata adottata per ottenere:
+
+- comportamento prevedibile;
+- maggiore sicurezza;
+- maggiore testabilità;
+- riduzione del rischio di esecuzione di codice non controllato;
+- risultati riproducibili;
+- migliore gestione degli errori.
+
+L'approccio mantiene la natura agentica dell'orchestrazione evitando di affidare al modello l'esecuzione arbitraria di codice sul sistema host.
+
+---
+
+## 10.9 Analytics Engine
+
+L'Analytics Engine utilizza Pandas per calcolare metriche e aggregazioni.
+
+Le analisi implementate includono:
+
+### KPI globali
+
+- total production;
+- total defective units;
+- defect rate;
+- rework rate;
+- scrap rate;
+- average quality score;
+- average downtime;
+- average cycle time.
+
+### Analisi per dimensione
+
+Il defect rate può essere confrontato per:
+
+- production line;
+- shift;
+- supplier;
+- component category;
+- vehicle model;
+- plant;
+- operator team.
+
+### Analisi temporale
+
+Il sistema supporta il calcolo del monthly defect rate trend.
+
+---
+
+## 10.10 Generazione dei grafici
+
+Il Data Agent utilizza Matplotlib in modalità non interattiva per generare immagini lato server.
+
+Quando una richiesta richiede una visualizzazione, il sistema:
+
+1. calcola i dati necessari;
+2. genera il grafico;
+3. salva l'immagine su disco;
+4. assegna un nome file univoco;
+5. restituisce il riferimento al backend.
+
+Le immagini generate vengono archiviate nella directory dedicata ai chart runtime.
+
+I file generati non fanno parte del codice sorgente e vengono esclusi dal version control.
+
+---
+
+## 10.11 Distribuzione dei grafici
+
+Il Data Agent espone i grafici tramite:
+
+```text
+GET /charts/:filename
+```
+
+Tuttavia il frontend non utilizza direttamente questo endpoint.
+
+Il backend Node.js intercetta il riferimento restituito dal Data Agent e lo converte in un endpoint applicativo:
+
+```text
+GET /api/charts/:filename
+```
+
+Il backend agisce quindi come proxy tra frontend e Data Agent.
+
+Questa soluzione mantiene il frontend disaccoppiato dal servizio Python.
+
+---
+
+## 10.12 Insight Generation
+
+Il Data Agent produce una sintesi testuale dell'analisi eseguita.
+
+L'output contiene le informazioni necessarie affinché il modello linguistico possa trasformare i risultati numerici in una risposta comprensibile per l'utente.
+
+La generazione della risposta finale rimane responsabilità dell'AI Decision Engine.
+
+Questo permette di separare:
+
+```text
+Python Data Agent
+    -> computes facts and metrics
+
+AI Decision Engine
+    -> communicates those facts to the user
+```
+
+---
+
+## 10.13 Gestione dello scope analitico
+
+Il Data Agent accetta solamente combinazioni analitiche supportate.
+
+Ad esempio, richieste che combinano simultaneamente più dimensioni di grouping non previste vengono rifiutate in modo controllato.
+
+Lo stesso principio viene applicato alle combinazioni tra analisi temporali e raggruppamenti non supportati.
+
+Parallelamente, il prompt dell'AI Decision Engine istruisce il modello a preservare lo scope originale della domanda e a non aggiungere filtri o dimensioni non richieste.
+
+Questa doppia protezione riduce il rischio di interpretazioni analitiche errate.
+
+---
+
+## 10.14 Vantaggi dell'architettura
+
+L'utilizzo di un microservizio Python separato offre diversi vantaggi:
+
+- accesso diretto all'ecosistema Pandas e Matplotlib;
+- isolamento della logica analitica;
 - indipendenza dal backend Node.js;
-- possibilità di utilizzare librerie scientifiche native di Python;
-- maggiore manutenibilità;
-- facilità di testing;
-- scalabilità del componente analitico;
-- possibilità di integrare nuovi algoritmi senza modificare il backend.
+- maggiore testabilità;
+- risultati riproducibili;
+- possibilità di evolvere il motore analitico separatamente;
+- riduzione del rischio associato all'esecuzione di codice dinamico;
+- possibilità futura di introdurre nuove analisi senza modificare il frontend.
+
+La separazione consente inoltre al backend di concentrarsi sull'orchestrazione, lasciando al Data Agent la responsabilità esclusiva del calcolo numerico.
 
 ---
 
@@ -1070,75 +1585,135 @@ L'utilizzo di un microservizio Python separato offre numerosi vantaggi:
 
 ## 11.1 Panoramica
 
-La comunicazione tra i componenti segue un modello client-server con orchestrazione centralizzata.
+La comunicazione tra i componenti di Maranello AI segue un modello client-server con orchestrazione centralizzata nel backend Node.js.
 
-Ogni componente comunica esclusivamente attraverso interfacce ben definite, evitando dipendenze dirette tra i servizi.
+Il frontend non comunica direttamente con ChromaDB né con il Python Data Agent.
 
-Questo approccio garantisce un basso accoppiamento e facilita l'evoluzione futura dell'architettura.
+Il backend rappresenta l'unico punto di ingresso applicativo e coordina:
+
+- gestione della conversazione;
+- interazione con OpenAI;
+- retrieval documentale;
+- analisi quantitativa;
+- distribuzione dei grafici;
+- gestione degli errori.
+
+Questa scelta riduce l'accoppiamento tra i componenti e nasconde al frontend la topologia interna del sistema.
 
 ---
 
-## 11.2 Flusso generale
+## 11.2 Flusso generale della conversazione
 
 ```mermaid
 sequenceDiagram
 
-participant User
-participant Frontend
-participant Backend
-participant DecisionEngine
-participant RAG
-participant DataAgent
+    participant User
+    participant Frontend
+    participant Backend
+    participant OpenAI
+    participant RAG
+    participant Chroma
+    participant DataAgent
 
-User->>Frontend: Inserisce una richiesta
+    User->>Frontend: Inserisce una richiesta
+    Frontend->>Backend: POST /api/chat
+    Backend->>OpenAI: Messaggio + tool definitions
 
-Frontend->>Backend: HTTP Request
+    alt Risposta conversazionale
+        OpenAI-->>Backend: Risposta finale
 
-Backend->>DecisionEngine: Analizza richiesta
+    else Richiesta documentale
+        OpenAI-->>Backend: search_knowledge_base
+        Backend->>RAG: Query documentale
+        RAG->>Chroma: Similarity search
+        Chroma-->>RAG: Chunk + metadati
+        RAG-->>Backend: Contesto documentale
+        Backend->>OpenAI: function_call_output
+        OpenAI-->>Backend: Risposta finale
 
-alt Documentale
+    else Richiesta analitica
+        OpenAI-->>Backend: analyze_manufacturing_data
+        Backend->>DataAgent: POST /api/analysis
+        DataAgent-->>Backend: Metriche + insight + chart reference
+        Backend->>OpenAI: function_call_output
+        OpenAI-->>Backend: Risposta finale
 
-DecisionEngine->>RAG: Query documentale
+    else Richiesta ibrida
+        OpenAI-->>Backend: Multiple tool calls
 
-RAG-->>DecisionEngine: Documenti
+        par Retrieval documentale
+            Backend->>RAG: Query
+            RAG->>Chroma: Similarity search
+            Chroma-->>RAG: Chunk + metadati
+            RAG-->>Backend: Contesto
+        and Analisi dati
+            Backend->>DataAgent: POST /api/analysis
+            DataAgent-->>Backend: Metriche + insight + chart reference
+        end
 
-else Analitica
+        Backend->>OpenAI: Tool outputs
+        OpenAI-->>Backend: Risposta sintetizzata
+    end
 
-DecisionEngine->>DataAgent: Analisi dati
-
-DataAgent-->>DecisionEngine: KPI e grafici
-
-else Ibrida
-
-DecisionEngine->>RAG: Recupero documenti
-
-DecisionEngine->>DataAgent: Analisi dati
-
-RAG-->>DecisionEngine: Contesto
-
-DataAgent-->>DecisionEngine: Risultati
-
-end
-
-DecisionEngine-->>Backend: Risposta sintetizzata
-
-Backend-->>Frontend: JSON Response
-
-Frontend-->>User: Visualizzazione risposta
+    Backend-->>Frontend: JSON response
+    Frontend-->>User: Testo + eventuale grafico
 ```
 
 ---
 
-## 11.3 Comunicazioni tra i componenti
+## 11.3 Flusso di recupero dei grafici
 
-| Origine | Destinazione | Protocollo |
-|----------|--------------|------------|
+I grafici vengono generati dal Python Data Agent e distribuiti al frontend attraverso il backend Node.js.
+
+```mermaid
+sequenceDiagram
+
+    participant Frontend
+    participant Backend
+    participant DataAgent
+
+    Frontend->>Backend: GET /api/charts/:filename
+    Backend->>DataAgent: GET /charts/:filename
+    DataAgent-->>Backend: PNG image
+    Backend-->>Frontend: PNG image
+```
+
+Il frontend non conosce direttamente l'indirizzo del microservizio Python.
+
+Questo mantiene un unico punto di accesso applicativo e riduce l'accoppiamento tra client e servizi interni.
+
+---
+
+## 11.4 Comunicazioni tra i componenti
+
+| Origine | Destinazione | Protocollo / Meccanismo |
+|---------|--------------|-------------------------|
 | Frontend | Backend | HTTP REST |
-| Backend | OpenAI | HTTPS API |
+| Backend | OpenAI API | HTTPS |
 | Backend | Python Data Agent | HTTP REST |
-| Backend | RAG Engine | Chiamata interna |
-| RAG Engine | ChromaDB | API ChromaDB |
-| Data Agent | Dataset CSV | Accesso locale |
+| Backend RAG Module | ChromaDB | ChromaDB client / HTTP |
+| Python Data Agent | Manufacturing Dataset | Accesso locale al file CSV |
+| Frontend | Backend Chart Proxy | HTTP GET |
+| Backend Chart Proxy | Python Data Agent | HTTP GET |
+
+---
+
+## 11.5 Gestione della sessione
+
+Ogni conversazione viene identificata mediante un `sessionId`.
+
+Il frontend conserva l'identificativo durante la sessione corrente e lo invia nelle richieste successive.
+
+Il backend utilizza il `sessionId` per:
+
+- recuperare la cronologia applicativa;
+- associare messaggi consecutivi;
+- recuperare l'identificativo dell'ultima risposta OpenAI;
+- mantenere continuità semantica tra i turni.
+
+La persistenza attuale è in-memory e viene considerata adeguata allo scope dimostrativo del progetto.
+
+Una futura evoluzione potrebbe introdurre persistenza su database o cache distribuita.
 
 ---
 
@@ -1147,19 +1722,26 @@ Frontend-->>User: Visualizzazione risposta
 ## 12.1 Tecnologie principali
 
 | Livello | Tecnologia |
-|----------|------------|
+|---------|------------|
 | Frontend | React |
-| Backend | Node.js |
-| Framework Backend | Express |
-| AI | OpenAI API |
-| Decision Engine | Large Language Model |
-| RAG | LangChain |
+| Linguaggio Frontend | TypeScript |
+| Build Tool Frontend | Vite |
+| Backend Runtime | Node.js |
+| Backend Framework | Express |
+| Linguaggio Backend | TypeScript |
+| AI SDK | OpenAI SDK |
+| AI API | OpenAI Responses API |
+| Orchestrazione | Native Function Calling |
+| LLM | Modello OpenAI configurabile tramite variabile d'ambiente |
+| Embeddings | OpenAI `text-embedding-3-small` |
 | Vector Database | ChromaDB |
-| Data Analytics | Python |
-| API Python | FastAPI |
+| Python API | FastAPI |
 | Data Analysis | Pandas |
-| Visualizzazione | Matplotlib |
+| Visualization | Matplotlib |
 | Dataset | CSV |
+| Knowledge Base | Markdown documents |
+| Testing Backend | Vitest |
+| Python Linting | Ruff |
 
 ---
 
@@ -1167,86 +1749,271 @@ Frontend-->>User: Visualizzazione risposta
 
 | Tecnologia | Motivazione |
 |------------|-------------|
-| React | Interfaccia moderna e component-based. |
-| Node.js | Ottimo supporto per applicazioni I/O intensive. |
-| Express | Framework leggero e facilmente estendibile. |
-| FastAPI | Alte prestazioni e semplicità di integrazione con Python. |
-| Pandas | Standard per la manipolazione di dati tabellari. |
-| ChromaDB | Database vettoriale semplice da integrare in progetti RAG. |
-| LangChain | Gestione della pipeline Retrieval-Augmented Generation. |
-| OpenAI | Capacità avanzate di comprensione e generazione del linguaggio naturale. |
+| React | Consente di realizzare un'interfaccia conversazionale moderna e component-based. |
+| TypeScript | Migliora la sicurezza dei tipi e la manutenibilità di frontend e backend. |
+| Vite | Offre un ambiente di sviluppo rapido e una build frontend semplice. |
+| Node.js | È adatto a un backend orientato a I/O, API e orchestrazione di servizi. |
+| Express | Fornisce un framework HTTP leggero e modulare. |
+| OpenAI SDK | Permette l'integrazione diretta con Responses API e function calling senza introdurre un livello di astrazione non necessario. |
+| OpenAI Responses API | Supporta conversazioni, tool calling e continuazione tramite response identifier. |
+| ChromaDB | Offre un Vector Database locale semplice da utilizzare per il retrieval semantico. |
+| OpenAI Embeddings | Migliorano il retrieval cross-language tra query italiane e documentazione inglese. |
+| FastAPI | Consente di esporre il Data Agent come microservizio Python tipizzato e facilmente testabile. |
+| Pandas | Fornisce strumenti maturi per cleaning, aggregazione e analisi di dati tabellari. |
+| Matplotlib | Permette la generazione server-side di grafici salvabili come immagini. |
+| Vitest | Consente testing rapido dei moduli TypeScript del backend. |
+| Ruff | Garantisce controllo statico e qualità del codice Python. |
 
 ---
 
 # 13. Architectural Decisions
 
-Durante la progettazione sono state adottate alcune decisioni architetturali fondamentali.
+Durante la progettazione e l'implementazione sono state adottate decisioni architetturali rilevanti per affidabilità, manutenibilità e sicurezza.
 
 | ID | Decisione | Motivazione |
 |----|-----------|-------------|
-| ADR-001 | Separazione tra frontend e backend | Migliore modularità e manutenzione. |
-| ADR-002 | Introduzione dell'AI Decision Engine | Centralizzare la logica decisionale. |
-| ADR-003 | Data Agent come microservizio indipendente | Isolare la logica analitica e sfruttare l'ecosistema Python. |
-| ADR-004 | Utilizzo del RAG | Ridurre il rischio di allucinazioni e migliorare l'affidabilità delle risposte. |
-| ADR-005 | Architettura modulare | Facilitare l'estensione futura del sistema. |
+| ADR-001 | Separazione tra frontend e backend | Isolare la UI dalla logica applicativa e dall'orchestrazione AI. |
+| ADR-002 | Backend Node.js come orchestratore centrale | Fornire un unico punto di coordinamento tra frontend, LLM, RAG e Data Agent. |
+| ADR-003 | Python Data Agent come microservizio FastAPI | Sfruttare l'ecosistema Python mantenendo indipendente la logica analitica. |
+| ADR-004 | ChromaDB come Vector Database locale | Supportare retrieval semantico riproducibile senza dipendere da un vector store esterno. |
+| ADR-005 | OpenAI SDK nativo invece di LangChain | Ridurre complessità e dipendenze utilizzando direttamente le capacità richieste dal progetto. |
+| ADR-006 | Responses API con function calling | Consentire al modello di selezionare autonomamente uno o più tool. |
+| ADR-007 | Tool routing LLM-driven | Evitare classificatori rigidi e mantenere il comportamento realmente agentico. |
+| ADR-008 | Data Agent deterministico | Evitare esecuzione arbitraria di codice Python e garantire analisi riproducibili e testabili. |
+| ADR-009 | OpenAI embeddings per il RAG | Migliorare il retrieval cross-language rispetto alla soluzione locale inizialmente valutata. |
+| ADR-010 | Chart proxy tramite backend Node.js | Impedire al frontend di dipendere direttamente dal servizio Python. |
+| ADR-011 | Session state in-memory | Fornire memoria conversazionale sufficiente per lo scope del progetto riducendo la complessità infrastrutturale. |
+| ADR-012 | Continuazione tramite OpenAI response identifier | Mantenere il contesto semantico tra turni senza ricostruire manualmente l'intera conversazione nel prompt. |
+| ADR-013 | Parallel execution dei tool indipendenti | Ridurre la latenza delle richieste ibride quando RAG e Data Agent possono essere eseguiti simultaneamente. |
+| ADR-014 | Dependency-aware error handling | Distinguere errori applicativi da indisponibilità di ChromaDB o Data Agent e restituire `503 Service Unavailable`. |
+| ADR-015 | Runtime chart files esclusi dal version control | Evitare la presenza nel repository di artefatti generati dinamicamente. |
+| ADR-016 | Environment-based configuration | Impedire l'hardcoding di API key, URL dei servizi e configurazioni sensibili. |
+
+---
+
+## 13.1 Decisione sul Data Agent deterministico
+
+La consegna del progetto richiede un agente Python capace di analizzare dati strutturati e produrre insight.
+
+Durante l'implementazione è stato scelto di non consentire al modello linguistico di generare ed eseguire codice Python arbitrario.
+
+L'LLM mantiene la responsabilità agentica di decidere **quando** utilizzare lo strumento analitico.
+
+Il microservizio Python mantiene invece la responsabilità di decidere **come** eseguire l'analisi attraverso operazioni controllate.
+
+Questa separazione migliora:
+
+- sicurezza;
+- prevedibilità;
+- riproducibilità;
+- testabilità;
+- gestione degli errori.
+
+---
+
+## 13.2 Decisione sull'utilizzo dell'SDK OpenAI nativo
+
+L'architettura iniziale considerava l'utilizzo di framework di orchestrazione come LangChain.
+
+Durante l'implementazione è stato verificato che i requisiti del progetto potevano essere soddisfatti direttamente tramite:
+
+- OpenAI SDK;
+- Responses API;
+- function calling;
+- custom tool executors.
+
+È stato quindi preferito l'SDK nativo per ridurre il numero di astrazioni e mantenere maggiore controllo sul ciclo agentico.
+
+---
+
+## 13.3 Decisione sugli embeddings
+
+Durante la validazione del RAG, una soluzione iniziale basata su embedding locali ha mostrato prestazioni insufficientemente stabili nelle query cross-language.
+
+Poiché uno dei requisiti funzionali del progetto è il supporto italiano/inglese, è stato adottato:
+
+```text
+text-embedding-3-small
+```
+
+La nuova configurazione ha migliorato il retrieval di documenti inglesi a partire da query formulate in italiano.
 
 ---
 
 # 14. Scalabilità
 
-L'architettura è progettata per consentire una crescita progressiva del sistema.
+L'architettura di Maranello AI è stata progettata per consentire un'evoluzione progressiva.
 
-Tra le possibili evoluzioni:
+L'attuale implementazione è ottimizzata per un ambiente locale e dimostrativo, ma la separazione dei componenti consente future estensioni.
 
-- aggiunta di nuovi strumenti AI;
-- integrazione con database relazionali;
+Possibili evoluzioni includono:
+
+- containerizzazione dei servizi;
+- deployment indipendente di frontend, backend, ChromaDB e Data Agent;
+- bilanciamento del carico tra più istanze backend;
+- persistenza delle sessioni su Redis o database;
+- autenticazione degli utenti;
+- Role-Based Access Control;
 - supporto a più dataset;
-- distribuzione dei servizi su container indipendenti;
-- bilanciamento del carico tra più istanze del backend.
+- supporto a più collection ChromaDB;
+- integrazione con database relazionali;
+- integrazione con sistemi ERP o MES;
+- aggiunta di nuovi tool;
+- sistemi di osservabilità e metriche;
+- code asincrone per analisi particolarmente onerose.
 
-La separazione tra i componenti permette di scalare ciascun servizio in modo indipendente, senza modificare gli altri moduli dell'applicazione.
+La separazione tra orchestrazione, retrieval e analisi permette di scalare i diversi componenti in modo indipendente.
 
 ---
 
 # 15. Sicurezza
 
-L'architettura prevede alcune misure di sicurezza di base.
+## 15.1 Gestione dei secret
 
-- utilizzo di variabili d'ambiente per API Key e configurazioni sensibili;
-- validazione degli input ricevuti dal frontend;
-- gestione controllata degli errori;
-- separazione tra logica applicativa e servizi AI;
-- limitazione dell'accesso diretto ai dataset e alla Knowledge Base.
+Le credenziali e le configurazioni sensibili non vengono hardcodate nel codice sorgente.
 
-Queste misure costituiscono una base solida per eventuali evoluzioni future, come autenticazione degli utenti o gestione dei ruoli.
+Le informazioni sensibili vengono caricate attraverso variabili d'ambiente, tra cui:
+
+- OpenAI API key;
+- modello LLM;
+- embedding model;
+- URL dei servizi;
+- configurazioni applicative.
+
+Il file `.env` locale è escluso dal version control.
+
+Il repository contiene solamente file `.env.example` privi di credenziali reali.
+
+---
+
+## 15.2 Git hygiene
+
+Il repository esclude dal version control artefatti locali e runtime, tra cui:
+
+- `.env`;
+- `node_modules`;
+- ambienti virtuali Python;
+- `__pycache__`;
+- directory di build;
+- grafici generati dinamicamente;
+- file temporanei del sistema operativo.
+
+Questo riduce il rischio di esposizione accidentale di informazioni sensibili e mantiene il repository riproducibile.
+
+---
+
+## 15.3 Input validation
+
+Gli input ricevuti dal frontend vengono validati prima dell'elaborazione.
+
+Una richiesta di chat vuota o non valida viene rifiutata senza invocare l'AI Orchestrator.
+
+Anche gli argomenti utilizzati dai tool vengono sottoposti a validazione attraverso gli schema definiti nel backend.
+
+---
+
+## 15.4 Sicurezza del Chart Proxy
+
+Il backend valida il nome dei file richiesti attraverso l'endpoint dei grafici.
+
+Questo impedisce di utilizzare il proxy per accedere arbitrariamente a percorsi del filesystem.
+
+Il frontend può quindi recuperare solamente immagini generate e rese disponibili secondo il flusso previsto dall'applicazione.
+
+---
+
+## 15.5 Failure isolation
+
+L'indisponibilità di un servizio dipendente viene gestita in modo controllato.
+
+In particolare:
+
+- indisponibilità del Python Data Agent;
+- indisponibilità di ChromaDB.
+
+vengono tradotte in risposte HTTP `503 Service Unavailable`.
+
+Questo impedisce che un errore di dipendenza venga rappresentato come un errore applicativo generico.
+
+---
+
+## 15.6 Limitazioni attuali
+
+L'implementazione dimostrativa non include ancora:
+
+- autenticazione;
+- autorizzazione;
+- crittografia applicativa aggiuntiva;
+- persistenza distribuita delle sessioni;
+- gestione centralizzata dei secret;
+- rate limiting.
+
+Queste caratteristiche rappresentano possibili evoluzioni per un deployment enterprise reale.
 
 ---
 
 # 16. Estendibilità
 
-Uno degli obiettivi principali dell'architettura è consentire l'aggiunta di nuove funzionalità senza modificare la struttura esistente.
+Uno degli obiettivi principali dell'architettura è consentire l'aggiunta di nuove funzionalità senza modificare il modello di interazione dell'utente.
 
-Ad esempio sarà possibile integrare:
+Il meccanismo di tool calling consente di integrare nuovi strumenti aggiungendo:
 
-- nuovi modelli linguistici;
-- nuovi strumenti AI;
-- ulteriori Data Agent specializzati;
+1. una nuova definizione del tool;
+2. il relativo schema dei parametri;
+3. un executor;
+4. l'eventuale integrazione con un nuovo servizio.
+
+Possibili estensioni includono:
+
+- nuovi Data Agent specializzati;
 - database SQL;
+- sistemi MES;
 - sistemi ERP;
-- piattaforme di Business Intelligence;
-- API aziendali esterne.
+- API aziendali;
+- strumenti di Business Intelligence;
+- document repository aziendali;
+- sistemi di ticketing;
+- forecasting;
+- anomaly detection;
+- predictive maintenance;
+- sistemi di alerting.
 
-La progettazione modulare garantisce che tali estensioni possano essere introdotte con un impatto minimo sul resto dell'applicazione.
+Il frontend potrebbe continuare a utilizzare la stessa interfaccia conversazionale anche dopo l'introduzione di nuovi tool.
 
 ---
 
 # 17. Conclusioni
 
-L'architettura di Maranello AI è stata progettata secondo principi di modularità, separazione delle responsabilità ed estendibilità.
+L'architettura finale di Maranello AI realizza un agente AI ibrido e multi-tool per il dominio **Quality & Manufacturing Operations**.
 
-L'introduzione dell'AI Decision Engine come componente centrale permette di coordinare in modo trasparente il motore RAG e il Python Data Agent, offrendo all'utente un'unica interfaccia conversazionale capace di gestire richieste documentali, analitiche e ibride.
+Il sistema integra:
 
-Questa architettura costituisce la base per lo sviluppo dell'applicazione e per le future evoluzioni del progetto.
+- interfaccia conversazionale React;
+- backend Node.js per orchestrazione e gestione delle sessioni;
+- OpenAI Responses API con function calling;
+- RAG basato su ChromaDB;
+- Knowledge Base aziendale;
+- Python Data Agent con FastAPI e Pandas;
+- Manufacturing Dataset;
+- generazione e rendering di grafici;
+- supporto italiano/inglese;
+- memoria conversazionale;
+- gestione controllata delle dipendenze.
+
+Il modello linguistico costituisce lo snodo decisionale del sistema e seleziona autonomamente gli strumenti necessari sulla base della richiesta dell'utente.
+
+L'architettura supporta richieste:
+
+- documentali;
+- analitiche;
+- ibride;
+- conversazionali.
+
+La separazione tra orchestrazione AI, retrieval documentale e analisi quantitativa rende il sistema modulare, testabile ed estendibile.
+
+Le decisioni adottate durante l'implementazione hanno inoltre privilegiato affidabilità e controllo, introducendo un Data Agent deterministico, un accesso centralizzato attraverso il backend e una gestione esplicita delle dipendenze.
+
+Maranello AI rappresenta quindi non soltanto un prototipo conversazionale, ma una dimostrazione completa di architettura AI orientata a un caso aziendale realistico.
 
 ---
 
@@ -1255,9 +2022,10 @@ Questa architettura costituisce la base per lo sviluppo dell'applicazione e per 
 | Informazione | Valore |
 |--------------|--------|
 | Documento | System Architecture |
-| Versione | 1.0 |
-| Stato | Draft |
+| Versione | 2.0 |
+| Stato | Final |
+| Tipologia | As-Built Architecture |
 | Lingua | Italiano |
-| Prossimo documento | 04_Data_Model.md |
+| Ultimo aggiornamento | Settembre 2026 |
 
 ---

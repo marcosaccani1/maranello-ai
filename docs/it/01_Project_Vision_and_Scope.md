@@ -1,11 +1,11 @@
 # Project Vision and Scope
 
 > **Progetto:** Maranello AI  
-> **Versione:** 1.0  
+> **Versione:** 2.0  
 > **Tipo documento:** Project Vision & Scope  
-> **Stato:** Draft  
+> **Stato:** Final  
 > **Autore:** Marco Saccani  
-> **Ultimo aggiornamento:** Luglio 2026
+> **Ultimo aggiornamento:** Settembre 2026
 
 ---
 
@@ -13,10 +13,10 @@
 
 1. Project Vision
    - 1.1 Nome del progetto
-   - 1.2 Panoramica
+   - 1.2 Panoramica del progetto
    - 1.3 Contesto aziendale
    - 1.4 Problema di business
-   - 1.5 Soluzione proposta
+   - 1.5 Soluzione realizzata
    - 1.6 Esempi di richieste
    - 1.7 Obiettivi del progetto
    - 1.8 Valore del progetto
@@ -25,12 +25,14 @@
 
 2. Project Scope
    - 2.1 Ambito del progetto
-   - 2.2 Funzionalità incluse
-   - 2.3 Funzionalità escluse
+   - 2.2 Componenti del sistema
+   - 2.3 Funzionalità incluse
    - 2.4 Architettura generale
-   - 2.5 Deliverable
-   - 2.6 Criteri di successo
-   - 2.7 Evoluzioni future
+   - 2.5 Deliverable del progetto
+   - 2.6 Funzionalità escluse
+   - 2.7 Vincoli del progetto
+   - 2.8 Criteri di successo
+   - 2.9 Evoluzioni future
 
 ---
 
@@ -40,245 +42,345 @@
 
 **Maranello AI**
 
-Maranello AI è un assistente intelligente basato su Intelligenza Artificiale progettato per supportare il reparto **Quality & Manufacturing Operations** di un'azienda manifatturiera operante nel settore automotive di alta gamma.
+Maranello AI è un assistente AI enterprise dimostrativo progettato per supportare il reparto **Quality & Manufacturing Operations** di un produttore automotive fittizio di alta gamma.
 
-Il progetto prende ispirazione dal distretto industriale di Maranello, senza fare riferimento ad alcuna azienda realmente esistente.
+Il nome e il contesto del progetto richiamano il distretto industriale di Maranello, ma l'azienda, i dati, le policy, le procedure e gli scenari utilizzati sono completamente fittizi.
+
+Il progetto non è affiliato, sponsorizzato o approvato da Ferrari N.V. o da altre aziende realmente esistenti.
+
+Questa scelta permette di rappresentare un caso d'uso automotive realistico mantenendo una separazione chiara tra il progetto dimostrativo e qualsiasi organizzazione o informazione aziendale reale.
 
 ---
 
 ## 1.2 Panoramica del progetto
 
-L'obiettivo del progetto è realizzare una piattaforma AI conversazionale capace di comprendere automaticamente la natura delle richieste formulate dagli utenti e scegliere autonomamente quale strumento utilizzare per produrre la risposta più corretta.
+Maranello AI realizza una piattaforma conversazionale capace di comprendere richieste formulate in linguaggio naturale e utilizzare autonomamente gli strumenti necessari per produrre una risposta supportata dalle fonti disponibili.
 
-Il sistema integra in un'unica applicazione tre differenti capacità:
+Il sistema integra in un'unica applicazione tre capacità principali:
 
-- consultazione della documentazione aziendale mediante Retrieval Augmented Generation (RAG);
-- analisi di dati strutturati tramite un agente Python dedicato;
-- combinazione dei risultati provenienti da entrambe le sorgenti.
+- consultazione della documentazione aziendale mediante Retrieval-Augmented Generation (RAG);
+- analisi di dati strutturati mediante un Python Data Agent dedicato;
+- combinazione di conoscenza documentale e risultati quantitativi per richieste Hybrid.
 
-L'utente interagisce esclusivamente attraverso una chat, senza dover conoscere la struttura interna del sistema né il funzionamento delle tecnologie utilizzate.
+L'utente interagisce esclusivamente attraverso una chat React e non deve conoscere la struttura interna del sistema né selezionare manualmente il componente da utilizzare.
 
-L'intero progetto è sviluppato seguendo un'architettura a microservizi con l'obiettivo di simulare un'applicazione enterprise moderna.
+La decisione viene gestita dal Large Language Model attraverso native function calling.
+
+Il modello può:
+
+- rispondere direttamente quando non è necessario utilizzare una fonte aziendale;
+- utilizzare il motore RAG per consultare la Knowledge Base;
+- delegare un'analisi quantitativa al Python Data Agent;
+- utilizzare entrambi gli strumenti quando la domanda richiede dati e policy.
+
+Il progetto adotta un'architettura modulare a microservizi composta principalmente da:
+
+- React Frontend;
+- Node.js Backend;
+- OpenAI Responses API;
+- RAG Engine;
+- ChromaDB;
+- Python Data Agent;
+- Manufacturing Dataset.
+
+L'obiettivo è dimostrare un pattern architetturale enterprise nel quale il Large Language Model svolge principalmente una funzione di ragionamento, orchestrazione e sintesi, mentre documenti e dati rimangono affidati a componenti specializzati.
 
 ---
 
 ## 1.3 Contesto aziendale
 
-Il reparto Quality & Manufacturing Operations gestisce quotidianamente due tipologie di informazioni.
+Il reparto **Quality & Manufacturing Operations** opera in un contesto nel quale le decisioni richiedono frequentemente l'utilizzo combinato di conoscenza procedurale e dati produttivi.
+
+Le informazioni rilevanti appartengono principalmente a due categorie.
 
 ### Documentazione aziendale
 
-Le informazioni operative sono distribuite all'interno di numerosi documenti, tra cui:
+Le attività operative sono supportate da documenti quali:
 
-- procedure operative;
-- manuali di ispezione;
-- standard qualitativi;
-- procedure di escalation;
-- policy interne;
-- linee guida;
-- documentazione fornitori;
-- classificazione difetti;
+- policy di qualità;
 - procedure di gestione delle non conformità;
-- FAQ aziendali.
+- procedure relative alla qualità dei fornitori;
+- procedure di rilavorazione e scarto;
+- regole di escalation produttiva;
+- standard e linee guida operative.
 
-Questi documenti rappresentano il patrimonio informativo dell'azienda ma risultano spesso difficili da consultare rapidamente.
+In un'organizzazione reale, queste informazioni possono essere distribuite tra repository differenti e risultare difficili da individuare rapidamente.
 
----
+Maranello AI rappresenta questo scenario attraverso una Knowledge Base aziendale fittizia e controllata, progettata specificamente per il progetto.
 
 ### Dati di produzione
 
-Parallelamente vengono prodotti grandi volumi di dati strutturati relativi ai processi produttivi.
+Parallelamente, il reparto utilizza dati strutturati relativi ai processi produttivi.
 
-Tra questi:
+Tra le informazioni rappresentate nel Manufacturing Dataset sono presenti:
 
-- lotti di produzione;
-- controlli qualità;
-- componenti difettosi;
+- batch di produzione;
+- date di produzione;
+- plant;
+- linee produttive;
+- modelli di veicolo;
+- turni;
+- unità prodotte;
+- unità difettose;
+- categorie di difetto;
 - rilavorazioni;
 - scarti;
-- linee produttive;
-- turni;
-- fornitori;
-- tempi di fermo;
-- costi della qualità;
-- KPI produttivi;
-- azioni correttive.
+- downtime;
+- cycle time;
+- quality score;
+- supplier;
+- categorie di componente;
+- stato delle ispezioni;
+- team operativi.
 
-Queste informazioni vengono normalmente analizzate utilizzando strumenti differenti rispetto a quelli impiegati per consultare la documentazione.
+Queste informazioni permettono di calcolare KPI e identificare trend o differenze tra le principali dimensioni produttive.
 
-La mancanza di integrazione tra dati e documenti rallenta il processo decisionale e aumenta il tempo necessario per ottenere informazioni affidabili.
+La separazione tra documentazione e dati costituisce il problema centrale affrontato dal progetto.
 
 ---
 
 ## 1.4 Problema di business
 
-L'azienda affronta principalmente tre criticità.
+Maranello AI nasce per rappresentare tre criticità tipiche di un ambiente enterprise.
 
 ### Ricerca delle informazioni
 
-La documentazione risulta difficile da consultare poiché:
+La documentazione operativa può essere difficile da consultare quando:
 
-- è distribuita in repository differenti;
-- esistono documenti duplicati;
-- sono presenti versioni obsolete;
-- la terminologia non è uniforme;
-- manca uno standard documentale condiviso.
+- è distribuita tra fonti differenti;
+- non è organizzata secondo una struttura uniforme;
+- contiene procedure specialistiche;
+- richiede tempo per individuare la sezione pertinente;
+- utilizza terminologia specifica del dominio.
 
-Gli operatori impiegano tempo prezioso nella ricerca delle informazioni invece che nello svolgimento delle proprie attività.
-
----
+La conseguenza è un aumento del tempo necessario per ottenere una risposta operativa verificabile.
 
 ### Analisi dei dati
 
-L'analisi dei dati produttivi richiede competenze tecniche specifiche.
+Le informazioni quantitative richiedono normalmente strumenti e competenze differenti rispetto a quelli utilizzati per consultare la documentazione.
 
-Le principali attività comprendono:
+Tra le attività analitiche rilevanti rientrano:
 
-- calcolo di KPI;
-- analisi dei trend;
+- calcolo dei KPI;
+- analisi del defect rate;
+- analisi del rework rate;
+- analisi dello scrap rate;
 - confronto tra linee produttive;
 - confronto tra turni;
-- identificazione di anomalie;
-- valutazione dei fornitori;
-- produzione di report;
+- valutazione dei supplier;
+- confronto tra component category;
+- analisi dei trend temporali;
 - generazione di grafici.
 
-Queste operazioni vengono generalmente svolte manualmente oppure utilizzando software dedicati.
-
----
+L'utente può quindi conoscere la domanda di business senza necessariamente conoscere il codice o le operazioni Pandas necessarie per ottenere il risultato.
 
 ### Mancanza di integrazione
 
-L'aspetto più critico consiste nella separazione tra documentazione e dati.
+Il problema più significativo emerge quando una decisione richiede contemporaneamente dati e documentazione.
 
-Per rispondere a una singola domanda di business è spesso necessario:
+Per esempio, conoscere il defect rate di un supplier non è sempre sufficiente.
 
-- consultare procedure operative;
-- analizzare dati numerici;
-- confrontare i risultati;
-- interpretare manualmente le informazioni.
+Può essere necessario determinare:
 
-Questo processo richiede tempo ed espone al rischio di errori interpretativi.
+1. quale supplier presenta il valore più significativo;
+2. quale valore è stato osservato;
+3. quale procedura aziendale si applica;
+4. come la procedura classifica tale valore;
+5. quale comportamento operativo è previsto.
+
+Senza integrazione, queste attività richiedono strumenti differenti e una successiva interpretazione manuale.
+
+Maranello AI riduce questa frammentazione offrendo un unico punto di accesso conversazionale.
 
 ---
 
-## 1.5 Soluzione proposta
+## 1.5 Soluzione realizzata
 
-Maranello AI introduce un unico punto di accesso alle informazioni aziendali.
+Maranello AI utilizza un Large Language Model come motore di orchestrazione.
 
-L'utente può formulare domande in linguaggio naturale sia in italiano sia in inglese.
+L'LLM riceve la domanda dell'utente e decide autonomamente se siano necessari strumenti esterni.
 
-Il sistema utilizza un Large Language Model come motore di orchestrazione.
+Gli strumenti principali disponibili sono:
 
-L'LLM non produce direttamente la risposta, ma decide quale componente del sistema deve essere eseguito.
+    search_knowledge_base
 
-Sono previste tre modalità operative.
+e:
+
+    analyze_manufacturing_data
+
+Il primo consente di recuperare conoscenza aziendale dalla Knowledge Base.
+
+Il secondo delega l'elaborazione quantitativa al Python Data Agent.
+
+Il sistema supporta quattro comportamenti principali.
+
+### Risposta conversazionale diretta
+
+Quando una domanda non richiede dati aziendali o documentazione interna, il modello può produrre una risposta senza utilizzare strumenti.
+
+Il sistema evita quindi di interrogare inutilmente RAG o Data Agent.
 
 ### Modalità RAG
 
-Quando la richiesta riguarda documentazione aziendale, il sistema interroga una Knowledge Base indicizzata tramite ChromaDB.
+Quando la domanda riguarda policy o procedure aziendali, il modello utilizza:
 
-L'assistente recupera esclusivamente le informazioni realmente presenti nella documentazione e costruisce la risposta citando le fonti utilizzate.
+    search_knowledge_base
 
-Qualora non siano disponibili informazioni pertinenti, il sistema comunica esplicitamente l'assenza di documentazione evitando di generare contenuti non verificabili.
+Il processo comprende:
 
----
+    User Question
+          ↓
+    LLM Tool Selection
+          ↓
+    RAG Connector
+          ↓
+    Embedding
+          ↓
+    ChromaDB
+          ↓
+    Relevant Knowledge Base Chunks
+          ↓
+    LLM
+          ↓
+    Grounded Answer
+
+La Knowledge Base contiene esclusivamente documentazione fittizia creata per il progetto.
+
+Il retrieval utilizza embedding semantici e mantiene informazioni relative alla provenienza dei contenuti recuperati.
+
+L'obiettivo è evitare che una policy aziendale venga sostituita da conoscenza generale non verificata del modello.
 
 ### Modalità Data Analysis
 
-Quando la richiesta riguarda dati numerici o analisi statistiche, il backend delega l'elaborazione a un microservizio Python.
+Quando la richiesta richiede un'analisi quantitativa, il modello utilizza:
 
-L'agente esegue automaticamente:
+    analyze_manufacturing_data
 
-- caricamento del dataset;
-- pulizia dei dati;
-- analisi statistiche;
-- calcolo dei KPI;
-- produzione di grafici;
-- generazione di insight.
+Il Backend delega quindi la richiesta al Python Data Agent basato su FastAPI e Pandas.
 
-I risultati vengono restituiti al backend che li presenta all'interno della chat.
+Il Data Agent può:
 
----
+- caricare e pulire il Manufacturing Dataset;
+- calcolare KPI globali;
+- aggregare i risultati per dimensioni supportate;
+- analizzare trend mensili;
+- generare grafici tramite Matplotlib;
+- restituire risultati strutturati al Backend.
 
-### Modalità Ibrida
+L'interpretazione analitica è intenzionalmente deterministica.
 
-Le richieste più complesse richiedono contemporaneamente documentazione e dati.
+Il servizio non esegue arbitrariamente codice Python generato dal Large Language Model, ma riconduce le richieste a operazioni analitiche supportate e validate.
 
-In questi casi il sistema:
+Questa scelta migliora:
 
-1. recupera le procedure aziendali pertinenti;
-2. analizza il dataset;
-3. confronta i risultati ottenuti;
-4. genera una risposta unica supportata sia da evidenze documentali sia da analisi quantitative.
+- sicurezza;
+- riproducibilità;
+- testabilità;
+- prevedibilità dei risultati numerici.
 
-Questa rappresenta la caratteristica distintiva di Maranello AI rispetto ai tradizionali chatbot aziendali.
+### Modalità Hybrid
+
+Le richieste più significative possono richiedere contemporaneamente evidenze quantitative e conoscenza procedurale.
+
+In questi casi il modello può utilizzare entrambi gli strumenti:
+
+    analyze_manufacturing_data
+              +
+    search_knowledge_base
+              ↓
+       LLM Synthesis
+              ↓
+        Final Answer
+
+Un esempio è la valutazione di un supplier.
+
+Il Data Agent può identificare il defect rate osservato, mentre la Knowledge Base fornisce le soglie della Supplier Quality Procedure.
+
+Il modello combina quindi:
+
+- evidenza numerica;
+- policy applicabile;
+- classificazione;
+- eventuale procedura di escalation.
+
+Questa capacità Hybrid rappresenta la caratteristica distintiva di Maranello AI rispetto a una semplice chat RAG o a un'interfaccia di analisi dati isolata.
 
 ---
 
 ## 1.6 Esempi di richieste
 
-Maranello AI è progettato per comprendere automaticamente la tipologia di richiesta formulata dall'utente e selezionare il componente più appropriato per elaborare la risposta.
+Gli esempi seguenti rappresentano scenari coerenti con le capacità implementate nella versione finale.
 
-Di seguito sono riportati alcuni esempi rappresentativi.
+### Richieste documentali — RAG
 
-### Richieste documentali (RAG)
-
-Queste richieste vengono soddisfatte interrogando esclusivamente la Knowledge Base aziendale.
-
-| Richiesta | Componente utilizzato |
+| Richiesta | Componente principale |
 |-----------|-----------------------|
-| Qual è la procedura per gestire una non conformità? | RAG |
-| Come viene classificato un difetto critico? | RAG |
-| Quali sono le responsabilità del Quality Manager? | RAG |
-| Quando deve essere aperta una Corrective Action? | RAG |
-| Qual è il processo di approvazione di una rilavorazione? | RAG |
+| Qual è la soglia critica del defect rate secondo la Quality Policy? | RAG |
+| Come deve essere gestita una non conformità? | RAG |
+| Quali soglie utilizza la Supplier Quality Procedure? | RAG |
+| Quando è necessaria un'escalation produttiva? | RAG |
+| Quali regole si applicano a rework e scrap? | RAG |
 
----
+### Richieste analitiche — Data Agent
 
-### Richieste analitiche (Data Agent)
-
-Queste richieste richiedono l'elaborazione del dataset produttivo.
-
-| Richiesta | Componente utilizzato |
+| Richiesta | Componente principale |
 |-----------|-----------------------|
-| Qual è il tasso medio di difetti dell'ultimo trimestre? | Data Agent |
-| Quale linea produttiva presenta il maggior numero di scarti? | Data Agent |
-| Mostrami il trend dei KPI qualità. | Data Agent |
-| Confronta i turni di produzione. | Data Agent |
-| Genera un grafico delle non conformità per mese. | Data Agent |
+| Qual è il defect rate complessivo? | Data Agent |
+| Quale linea produttiva presenta il defect rate più elevato? | Data Agent |
+| Quale supplier presenta il defect rate più elevato? | Data Agent |
+| Confronta il defect rate tra i turni. | Data Agent |
+| Mostrami il trend mensile del defect rate. | Data Agent |
+| Genera il grafico del trend mensile del defect rate. | Data Agent |
 
----
+### Richieste Hybrid
 
-### Richieste ibride
+| Richiesta | Componenti principali |
+|-----------|------------------------|
+| Quale supplier presenta il defect rate più elevato e come viene classificato dalla Supplier Quality Procedure? | RAG + Data Agent |
+| Analizza il defect rate e confrontalo con le soglie della Quality Policy. | RAG + Data Agent |
+| Il valore osservato richiede un'escalation secondo la policy aziendale? | RAG + Data Agent |
 
-Le richieste ibride richiedono contemporaneamente l'accesso alla documentazione e l'analisi dei dati.
+### Richieste multi-turn
 
-| Richiesta | Componenti utilizzati |
-|-----------|-----------------------|
-| Le non conformità registrate rispettano la procedura aziendale? | RAG + Data Agent |
-| Quali difetti stanno aumentando e quale procedura è prevista? | RAG + Data Agent |
-| I tempi di rilavorazione rispettano gli standard interni? | RAG + Data Agent |
-| Analizza gli scarti e suggerisci le procedure applicabili. | RAG + Data Agent |
+Maranello AI supporta inoltre riferimenti derivati dalla conversazione precedente.
+
+Esempio:
+
+    User:
+    Which supplier has the highest defect rate?
+
+    Assistant:
+    SUP-07 ...
+
+    User:
+    What does the policy say about that supplier?
+
+Il sistema mantiene il contesto della conversazione e può interpretare il riferimento:
+
+    that supplier
+
+utilizzando lo stato della sessione e la continuità fornita dalla Responses API.
 
 ---
 
 ## 1.7 Obiettivi del progetto
 
-Il progetto nasce con l'obiettivo di dimostrare come differenti tecnologie di Intelligenza Artificiale possano essere integrate all'interno di un'unica piattaforma enterprise.
-
-Gli obiettivi principali sono riportati nella tabella seguente.
+Gli obiettivi finali di Maranello AI sono:
 
 | ID | Obiettivo |
 |----|-----------|
-| OBJ-01 | Centralizzare l'accesso alla documentazione aziendale. |
-| OBJ-02 | Ridurre il tempo necessario per reperire informazioni operative. |
-| OBJ-03 | Automatizzare l'analisi dei dati produttivi. |
-| OBJ-04 | Consentire interrogazioni in linguaggio naturale. |
-| OBJ-05 | Integrare documentazione e dati in un'unica risposta. |
-| OBJ-06 | Dimostrare l'utilizzo di un'architettura AI a microservizi. |
-| OBJ-07 | Realizzare un progetto riutilizzabile come portfolio professionale. |
-| OBJ-08 | Garantire il supporto bilingue (Italiano e Inglese). |
+| OBJ-01 | Centralizzare l'accesso conversazionale alla conoscenza aziendale. |
+| OBJ-02 | Ridurre la complessità necessaria per reperire informazioni operative. |
+| OBJ-03 | Rendere accessibili analisi quantitative tramite linguaggio naturale. |
+| OBJ-04 | Integrare documentazione e dati all'interno della stessa esperienza utente. |
+| OBJ-05 | Utilizzare un LLM per il routing autonomo tra differenti strumenti. |
+| OBJ-06 | Dimostrare un'architettura AI modulare basata su servizi specializzati. |
+| OBJ-07 | Fornire risposte RAG grounded nella Knowledge Base. |
+| OBJ-08 | Garantire risultati numerici deterministici attraverso il Python Data Agent. |
+| OBJ-09 | Supportare conversazioni in italiano e inglese. |
+| OBJ-10 | Supportare conversazioni multi-turn mantenendo il contesto della sessione. |
+| OBJ-11 | Integrare visualizzazioni grafiche direttamente nell'esperienza conversazionale. |
+| OBJ-12 | Realizzare un progetto tecnicamente documentato e riutilizzabile come portfolio professionale. |
 
 ---
 
@@ -286,53 +388,118 @@ Gli obiettivi principali sono riportati nella tabella seguente.
 
 Maranello AI non rappresenta semplicemente un chatbot aziendale.
 
-Il progetto dimostra come un sistema AI moderno possa diventare uno strumento decisionale capace di combinare differenti sorgenti informative.
+Il valore del progetto deriva dalla capacità di utilizzare una singola interfaccia conversazionale per accedere a capacità differenti mantenendo separate le responsabilità tecniche.
 
-I principali benefici attesi sono:
+Dal punto di vista dell'utente, il sistema riduce la necessità di conoscere:
 
-- riduzione dei tempi di ricerca delle informazioni;
-- miglioramento della qualità delle decisioni;
-- maggiore accessibilità alla documentazione;
-- automazione delle analisi ripetitive;
-- supporto decisionale basato su dati e procedure;
-- riduzione del rischio di interpretazioni errate;
-- incremento dell'efficienza operativa.
+- posizione dei documenti;
+- struttura della Knowledge Base;
+- linguaggi di query;
+- codice Python;
+- formule dei KPI;
+- strumenti di visualizzazione;
+- modalità di selezione dei servizi.
 
-Dal punto di vista tecnico il progetto dimostra inoltre l'integrazione di tecnologie moderne quali:
+L'utente formula invece una domanda in linguaggio naturale.
+
+Dal punto di vista architetturale:
+
+    User
+      ↓
+    Conversational Interface
+      ↓
+    AI Orchestration
+      ↓
+    Appropriate Enterprise Capability
+
+I principali benefici dimostrati dal progetto sono:
+
+- accesso semplificato alla conoscenza;
+- riduzione della frammentazione tra documenti e dati;
+- analisi quantitative accessibili in linguaggio naturale;
+- supporto decisionale basato su fonti controllate;
+- integrazione tra evidenza numerica e procedure;
+- esperienza bilingue;
+- visualizzazione dei risultati;
+- gestione della continuità conversazionale.
+
+Dal punto di vista tecnico, il progetto dimostra l'integrazione di:
 
 - Large Language Models;
-- Retrieval Augmented Generation (RAG);
-- Vector Database;
-- Python Data Analysis;
-- Microservizi;
-- REST API;
+- OpenAI Responses API;
+- native function calling;
+- Retrieval-Augmented Generation;
+- semantic embeddings;
+- ChromaDB;
+- Python;
+- FastAPI;
+- Pandas;
+- Matplotlib;
+- Node.js;
+- Express;
 - React;
-- Node.js.
+- TypeScript;
+- REST API.
 
 ---
 
 ## 1.9 Stakeholder
 
-Il progetto coinvolge differenti categorie di stakeholder.
+Gli stakeholder rappresentano i principali profili che potrebbero beneficiare da un sistema equivalente in un contesto enterprise.
 
-| Stakeholder | Ruolo |
-|--------------|--------|
-| Quality Engineer | Consulta procedure e analizza indicatori di qualità. |
-| Production Manager | Monitora le performance produttive. |
-| Quality Manager | Supporta il processo decisionale. |
-| Manufacturing Engineer | Analizza anomalie e trend produttivi. |
-| System Administrator | Gestisce l'infrastruttura applicativa. |
-| AI Developer | Sviluppa ed evolve il sistema. |
+| Stakeholder | Interesse principale |
+|-------------|----------------------|
+| Quality Engineer | Consultazione delle procedure e analisi degli indicatori di qualità. |
+| Manufacturing Engineer | Analisi di linee, turni, trend e anomalie produttive. |
+| Supplier Quality Engineer | Valutazione delle performance dei supplier e consultazione delle relative procedure. |
+| Production Manager | Supporto alla valutazione delle performance produttive e delle escalation. |
+| Quality Manager | Accesso combinato a evidenze quantitative e policy di qualità. |
+| AI / Software Engineer | Evoluzione, manutenzione e integrazione della piattaforma. |
+
+Questi stakeholder rappresentano profili di riferimento del business scenario e non utenti reali del sistema dimostrativo.
+
+La versione corrente non implementa autenticazione o Role-Based Access Control.
 
 ---
 
 ## 1.10 Vision Statement
 
-La visione del progetto è quella di realizzare una piattaforma di Intelligenza Artificiale capace di trasformare la consultazione della documentazione aziendale e l'analisi dei dati in un'unica esperienza conversazionale.
+La visione di Maranello AI è dimostrare come un assistente AI enterprise possa trasformare l'accesso alla conoscenza aziendale e l'analisi dei dati in un'unica esperienza conversazionale.
 
-Maranello AI mira a ridurre la complessità tecnologica percepita dagli utenti finali, consentendo loro di ottenere informazioni affidabili semplicemente formulando domande in linguaggio naturale.
+Il sistema riduce la complessità tecnologica percepita dall'utente delegando all'orchestratore AI la selezione delle capacità necessarie.
 
-Il progetto rappresenta inoltre una dimostrazione concreta di come un'architettura AI moderna possa integrare differenti strumenti specialistici mantenendo un'esperienza utente semplice, intuitiva e coerente.
+La visione architetturale può essere sintetizzata come:
+
+    Ask one question
+          ↓
+    AI determines what is needed
+          ↓
+    Retrieve knowledge and/or analyze data
+          ↓
+    Combine verified evidence
+          ↓
+    Return one contextual answer
+
+Il Large Language Model non viene utilizzato come unica fonte di verità.
+
+Le responsabilità vengono invece separate:
+
+    LLM
+    reasoning, routing and synthesis
+
+    Knowledge Base
+    company policies and procedures
+
+    Python Data Agent
+    deterministic numerical analysis
+
+    Backend
+    orchestration and application state
+
+    Frontend
+    conversational user experience
+
+Maranello AI rappresenta quindi una dimostrazione concreta di come RAG, tool calling, analisi strutturata dei dati e interazione conversazionale possano essere integrati in un'architettura coerente, verificabile ed estendibile.
 
 ---
 
@@ -340,194 +507,779 @@ Il progetto rappresenta inoltre una dimostrazione concreta di come un'architettu
 
 ## 2.1 Ambito del progetto
 
-Il progetto prevede la progettazione e lo sviluppo di un sistema software composto da più componenti indipendenti, integrati attraverso un'architettura a microservizi.
+Maranello AI realizza un assistente AI enterprise dimostrativo per il dominio **Quality & Manufacturing Operations** di un produttore automotive fittizio.
 
-L'applicazione consentirà agli utenti di:
+Lo scope implementato comprende l'intero flusso necessario per consentire a un utente di:
 
-- interrogare una Knowledge Base aziendale;
-- analizzare un dataset manifatturiero;
-- ottenere grafici e KPI;
-- ricevere risposte contestualizzate;
-- utilizzare il sistema sia in italiano sia in inglese;
-- interagire mediante una chat web.
+- interagire con il sistema attraverso una chat;
+- formulare richieste in italiano o inglese;
+- consultare documentazione aziendale fittizia;
+- analizzare un dataset manifatturiero strutturato;
+- ottenere KPI e confronti quantitativi;
+- richiedere trend temporali;
+- visualizzare grafici;
+- combinare risultati numerici e procedure aziendali;
+- continuare una conversazione mantenendo il contesto.
 
-Il sistema deciderà automaticamente quale componente utilizzare in funzione della richiesta ricevuta.
+L'utente non seleziona manualmente il servizio da utilizzare.
+
+La scelta tra risposta diretta, RAG, Data Analysis e comportamento Hybrid viene effettuata autonomamente dal Large Language Model attraverso native function calling.
+
+Lo scope finale può essere rappresentato come:
+
+    User
+      ↓
+    React Conversational Interface
+      ↓
+    Node.js Backend
+      ↓
+    AI Orchestration
+      ↓
+    ┌──────────────────────┬─────────────────────────┐
+    │                      │                         │
+    ▼                      ▼                         ▼
+    Direct Answer     Knowledge Retrieval      Data Analysis
+                           │                         │
+                           ▼                         ▼
+                        ChromaDB              Python Data Agent
+                           │                         │
+                           ▼                         ▼
+                    Knowledge Base           Manufacturing Dataset
+    │                      │                         │
+    └──────────────────────┴─────────────────────────┘
+                           ↓
+                    Response Synthesis
+                           ↓
+                         User
+
+Il progetto dimostra quindi l'integrazione tra AI generativa, retrieval documentale e analisi strutturata dei dati all'interno di una singola esperienza conversazionale.
 
 ---
 
 ## 2.2 Componenti del sistema
 
-L'architettura sarà composta dai seguenti moduli principali.
+L'architettura finale comprende i seguenti componenti principali.
 
-| Componente | Responsabilità |
-|------------|----------------|
-| Frontend React | Interfaccia utente conversazionale. |
-| Backend Node.js | Orchestrazione delle richieste e integrazione dei servizi. |
-| Large Language Model | Classificazione delle richieste e generazione delle risposte. |
-| Knowledge Base | Archiviazione della documentazione aziendale. |
-| ChromaDB | Ricerca semantica dei documenti. |
-| Python Data Agent | Analisi del dataset e generazione di grafici. |
-| Dataset CSV | Fonte dati per le analisi quantitative. |
+### React Frontend
+
+Il Frontend costituisce l'unico punto di interazione diretta dell'utente.
+
+Le responsabilità principali comprendono:
+
+- rendering della chat;
+- gestione dei messaggi;
+- input dell'utente;
+- stato di loading/typing;
+- visualizzazione delle risposte;
+- gestione degli errori;
+- mantenimento del `sessionId`;
+- rendering dei grafici;
+- comunicazione con il Backend.
+
+Il Frontend non comunica direttamente con:
+
+- OpenAI API;
+- Python Data Agent;
+- ChromaDB.
+
+Tutte le richieste applicative passano attraverso il Backend Node.js.
+
+### Node.js Backend
+
+Il Backend Node.js ed Express rappresenta il gateway applicativo e il principale livello di orchestrazione.
+
+Le responsabilità comprendono:
+
+- esposizione delle REST API;
+- validazione degli input;
+- gestione delle conversazioni;
+- integrazione con OpenAI Responses API;
+- esposizione dei tool al modello;
+- esecuzione dei function call;
+- integrazione con ChromaDB;
+- integrazione con il Python Data Agent;
+- costruzione della risposta finale;
+- gestione dei grafici tramite Chart Proxy;
+- gestione centralizzata degli errori.
+
+Il Backend mantiene inoltre lo stato conversazionale in-memory per la durata della sessione applicativa.
+
+### AI Orchestration
+
+Il Large Language Model viene utilizzato attraverso la OpenAI Responses API.
+
+Il modello riceve la domanda dell'utente e può utilizzare due tool principali:
+
+    search_knowledge_base
+
+    analyze_manufacturing_data
+
+La selezione viene effettuata attraverso native function calling.
+
+Il modello può quindi:
+
+- non utilizzare alcun tool;
+- utilizzare il tool RAG;
+- utilizzare il Data Agent;
+- utilizzare entrambi.
+
+Il Backend gestisce l'esecuzione dei tool e restituisce i relativi output al modello fino alla produzione della risposta finale.
+
+### RAG Engine
+
+Il componente RAG consente di recuperare informazioni dalla Knowledge Base aziendale fittizia.
+
+Il flusso comprende:
+
+    User Question
+          ↓
+    search_knowledge_base
+          ↓
+    Semantic Embedding
+          ↓
+    ChromaDB
+          ↓
+    Relevant Chunks
+          ↓
+    Source Metadata
+          ↓
+    LLM
+
+Il retrieval utilizza il modello di embedding configurato per il progetto e supporta query in italiano e inglese.
+
+### ChromaDB
+
+ChromaDB viene utilizzato come vector database locale.
+
+La Knowledge Base finale comprende cinque documenti operativi principali indicizzati in:
+
+    149 chunks
+
+Il vector database memorizza embedding e metadata necessari al retrieval semantico.
+
+### Knowledge Base
+
+La Knowledge Base contiene documentazione aziendale completamente fittizia creata specificamente per il progetto.
+
+I documenti principali sono:
+
+    knowledge_base/
+    ├── README.md
+    ├── manufacturing_quality_policy.md
+    ├── non_conformity_procedure.md
+    ├── supplier_quality_procedure.md
+    ├── rework_and_scrap_procedure.md
+    └── production_escalation_policy.md
+
+I documenti definiscono policy e procedure coerenti con il business scenario di Quality & Manufacturing Operations.
+
+### Python Data Agent
+
+Il Data Agent è un microservizio FastAPI responsabile delle analisi quantitative.
+
+Utilizza principalmente:
+
+- Python;
+- FastAPI;
+- Pandas;
+- Matplotlib.
+
+Il componente:
+
+- riceve una richiesta analitica dal Backend;
+- interpreta la dimensione richiesta;
+- utilizza il Manufacturing Dataset;
+- esegue operazioni di cleaning;
+- calcola KPI;
+- esegue aggregazioni;
+- analizza trend;
+- genera grafici quando necessario;
+- restituisce il risultato al Backend.
+
+L'approccio è intenzionalmente deterministico.
+
+Il servizio non esegue arbitrariamente codice Python generato dall'LLM.
+
+### Manufacturing Dataset
+
+Il dataset sintetico contiene:
+
+    2000 rows
+    20 columns
+
+Ogni record rappresenta un batch produttivo.
+
+Il dataset contiene:
+
+- metriche numeriche;
+- categorie;
+- date;
+- informazioni relative a linee e plant;
+- supplier;
+- component category;
+- turni;
+- indicatori di qualità;
+- anomalie intenzionali;
+- missing values;
+- duplicati;
+- outlier.
+
+Sono inoltre presenti relazioni sintetiche controllate che permettono di ottenere pattern analitici verificabili.
 
 ---
 
 ## 2.3 Funzionalità incluse
 
-Il progetto comprenderà:
+Le funzionalità implementate vengono suddivise nelle seguenti macro-aree.
 
-- chat conversazionale;
-- supporto bilingue;
-- Retrieval Augmented Generation;
-- analisi dati automatica;
-- generazione di grafici;
-- orchestrazione AI;
-- gestione della cronologia della conversazione;
-- visualizzazione delle fonti documentali;
+### Conversational Interface
+
+Il sistema supporta:
+
+- chat utente-assistente;
+- messaggi multi-turn;
+- stato di loading;
 - gestione degli errori;
-- architettura a microservizi.
+- visualizzazione dei grafici;
+- conversazioni in italiano e inglese.
+
+### Conversation Memory
+
+Il Backend gestisce sessioni conversazionali attraverso:
+
+- `sessionId`;
+- storico dei messaggi;
+- `lastResponseId`.
+
+Quando disponibile, il riferimento all'ultima risposta viene utilizzato attraverso:
+
+    previous_response_id
+
+nelle chiamate successive alla Responses API.
+
+Questo permette di mantenere la continuità della conversazione.
+
+### Autonomous Tool Routing
+
+L'LLM decide autonomamente quali capacità utilizzare.
+
+Sono supportati:
+
+    Direct
+    RAG
+    Data Analysis
+    Hybrid
+
+Non è presente una route HTTP separata per ciascun comportamento.
+
+Il routing avviene internamente attraverso function calling.
+
+### Knowledge Retrieval
+
+Il sistema può:
+
+- effettuare retrieval semantico;
+- interrogare ChromaDB;
+- recuperare chunk rilevanti;
+- utilizzare metadata relativi alla fonte;
+- rispondere utilizzando il contesto documentale;
+- recuperare contenuti inglesi a partire da domande italiane.
+
+### Data Analysis
+
+Il Data Agent supporta:
+
+- KPI globali;
+- analisi per `production_line`;
+- analisi per `shift`;
+- analisi per `supplier_id`;
+- analisi per `component_category`;
+- analisi per `vehicle_model`;
+- analisi per `plant`;
+- analisi per `operator_team`;
+- trend mensile.
+
+Tra i KPI calcolati sono presenti:
+
+- total production;
+- defective units;
+- defect rate;
+- rework rate;
+- scrap rate;
+- average quality score;
+- average downtime;
+- average cycle time.
+
+### Data Cleaning
+
+Il Data Agent gestisce le anomalie introdotte intenzionalmente nel dataset.
+
+Il processo comprende:
+
+- rimozione dei duplicati;
+- normalizzazione dei valori testuali;
+- parsing di date con formati differenti;
+- gestione dei missing values;
+- gestione di quality score non validi;
+- identificazione di record numericamente incoerenti;
+- gestione controllata degli outlier.
+
+### Chart Generation
+
+Il Data Agent genera grafici PNG attraverso Matplotlib.
+
+Il flusso finale è:
+
+    Analytical Request
+          ↓
+    Python Data Agent
+          ↓
+    Matplotlib
+          ↓
+    Generated PNG
+          ↓
+    Backend Chart Proxy
+          ↓
+    React Frontend
+
+Il Frontend non accede direttamente al microservizio Python.
+
+### Hybrid Reasoning
+
+Il sistema può utilizzare nello stesso processo:
+
+    quantitative evidence
+             +
+    company policy
+
+Per esempio:
+
+    Supplier defect rate
+             +
+    Supplier Quality Procedure
+             ↓
+    Contextual Classification
+
+Questo comportamento permette di trasformare un semplice KPI in una risposta contestualizzata rispetto alle regole aziendali.
+
+### Multilingual Interaction
+
+Il sistema supporta:
+
+    Italian question
+          ↓
+    Italian answer
+
+e:
+
+    English question
+          ↓
+    English answer
+
+Non viene richiesto all'utente di selezionare manualmente la lingua.
+
+### Controlled Failure Handling
+
+Quando una fonte necessaria non è disponibile, il sistema utilizza un errore controllato.
+
+Sono gestiti in particolare:
+
+- Data Agent unavailable;
+- ChromaDB unavailable.
+
+In questi casi il Backend restituisce una risposta HTTP controllata anziché permettere al modello di inventare dati o policy.
 
 ---
 
 ## 2.4 Architettura generale
 
-L'architettura di Maranello AI è progettata secondo un modello a microservizi, in cui ogni componente è responsabile di una specifica funzionalità.
+L'architettura finale è composta da servizi con responsabilità separate.
 
-Il frontend rappresenta l'unico punto di contatto con l'utente, mentre il backend svolge il ruolo di orchestratore dell'intero sistema.
+    ┌──────────────────────────────┐
+    │        React Frontend        │
+    │   Conversational Interface  │
+    └──────────────┬───────────────┘
+                   │
+                   │ HTTP
+                   ▼
+    ┌──────────────────────────────┐
+    │     Node.js / Express        │
+    │           Backend            │
+    │                              │
+    │ - REST API                   │
+    │ - Conversation Manager       │
+    │ - AI Orchestration           │
+    │ - Tool Execution             │
+    │ - Error Handling             │
+    │ - Chart Proxy                │
+    └──────────┬───────────┬───────┘
+               │           │
+               │           │
+               ▼           ▼
+    ┌────────────────┐   ┌────────────────────┐
+    │    ChromaDB    │   │ Python Data Agent  │
+    │                │   │      FastAPI       │
+    │ Vector Store   │   │      Pandas        │
+    └───────┬────────┘   │     Matplotlib     │
+            │            └─────────┬──────────┘
+            ▼                      │
+    ┌────────────────┐             ▼
+    │ Knowledge Base │   ┌────────────────────┐
+    │                │   │ Manufacturing CSV  │
+    │ Fictional Docs │   │ Synthetic Dataset  │
+    └────────────────┘   └────────────────────┘
 
-Il Large Language Model analizza ogni richiesta ricevuta e determina quale componente debba essere utilizzato per produrre la risposta più appropriata.
+                   Node.js Backend
+                          │
+                          ▼
+                  OpenAI Responses API
+                          │
+                          ▼
+                Native Function Calling
 
-L'architettura prevede tre possibili flussi di esecuzione:
+La separazione permette di mantenere indipendenti:
 
-- consultazione della Knowledge Base tramite Retrieval-Augmented Generation (RAG);
-- analisi del dataset tramite il Python Data Agent;
-- utilizzo combinato di entrambe le componenti per rispondere a richieste ibride.
-
-L'obiettivo è garantire una chiara separazione delle responsabilità, elevata manutenibilità e possibilità di estendere il sistema con nuovi strumenti senza modificare l'architettura principale.
+- esperienza utente;
+- orchestrazione;
+- retrieval;
+- analisi numerica;
+- persistenza vettoriale;
+- provider AI.
 
 ---
 
 ## 2.5 Deliverable del progetto
 
-Al termine dello sviluppo il progetto comprenderà i seguenti deliverable.
+I deliverable tecnici comprendono:
 
-| Deliverable | Descrizione |
-|-------------|-------------|
-| Frontend Web | Interfaccia conversazionale sviluppata in React. |
-| Backend API | Servizio Node.js responsabile dell'orchestrazione. |
-| Python Data Agent | Microservizio dedicato all'analisi dei dati. |
-| Knowledge Base | Collezione di documenti aziendali indicizzati tramite ChromaDB. |
-| Dataset | Dataset realistico relativo alle attività di Quality & Manufacturing Operations. |
-| Documentazione tecnica | Documentazione completa del progetto in italiano e inglese. |
-| Repository GitHub | Repository contenente codice, documentazione e istruzioni di installazione. |
+### Source Code
+
+Repository contenente:
+
+- `frontend/`;
+- `backend/`;
+- `data_agent/`;
+- Knowledge Base;
+- Manufacturing Dataset;
+- test;
+- configurazioni;
+- documentazione.
+
+### Frontend
+
+Applicazione React contenente:
+
+- interfaccia chat;
+- gestione dello stato;
+- loading indicator;
+- error handling;
+- rendering delle risposte;
+- rendering dei grafici.
+
+### Backend
+
+Servizio Node.js contenente:
+
+- REST API;
+- Conversation Manager;
+- AI orchestration;
+- OpenAI integration;
+- RAG connector;
+- Data Agent connector;
+- Chart Proxy;
+- error handling.
+
+### Python Data Agent
+
+Microservizio FastAPI contenente:
+
+- data loading;
+- data cleaning;
+- Question Interpreter;
+- KPI calculation;
+- grouped analysis;
+- monthly trend analysis;
+- chart generation.
+
+### Manufacturing Dataset
+
+Dataset CSV sintetico con almeno 1000 righe, realizzato nella versione finale con:
+
+    2000 rows
+
+e anomalie intenzionali utilizzate per dimostrare il processo di cleaning.
+
+### Knowledge Base
+
+Documentazione aziendale fittizia relativa al dominio Quality & Manufacturing Operations.
+
+### Technical Documentation
+
+La documentazione tecnica principale comprende:
+
+- Project Vision and Scope;
+- Software Requirements Specification;
+- System Architecture Document;
+- Data Model;
+- API Specification;
+- Test Plan;
+- README finale.
+
+La documentazione tecnica principale è mantenuta in italiano, mentre codice, identificatori tecnici, API e documentazione interna al codice utilizzano convenzioni tecniche in inglese.
+
+### Final Presentation
+
+La consegna finale prevede una presentazione PDF/PPTX contenente:
+
+- business problem;
+- valore della soluzione;
+- architettura;
+- autonomous routing;
+- RAG;
+- Data Agent;
+- screenshot dell'applicazione;
+- scenario RAG;
+- scenario Data Analysis con grafico;
+- scenario Hybrid;
+- challenge tecniche;
+- debugging;
+- risultati;
+- riferimento al repository GitHub.
+
+La presentazione viene finalizzata dopo la chiusura della documentazione tecnica.
 
 ---
 
 ## 2.6 Funzionalità escluse
 
-Per mantenere il progetto focalizzato sugli obiettivi prefissati, alcune funzionalità non saranno incluse nella prima versione.
+Le seguenti funzionalità non fanno parte dell'implementazione finale corrente:
 
-Tra queste:
+- autenticazione enterprise;
+- Single Sign-On;
+- Role-Based Access Control effettivo;
+- database aziendali reali;
+- integrazione ERP;
+- integrazione MES;
+- integrazione con sensori industriali;
+- dati produttivi reali;
+- modifica automatica dei sistemi di produzione;
+- esecuzione di azioni operative sui macchinari;
+- approvazione automatica di non conformità;
+- modifica automatica delle policy;
+- persistent conversation database;
+- distributed session management;
+- deployment cloud production-grade;
+- high availability;
+- disaster recovery;
+- distributed tracing;
+- centralized monitoring platform;
+- browser E2E automation;
+- formal performance testing;
+- formal penetration testing;
+- CI/CD completo dedicato al progetto finale.
 
-- autenticazione e gestione utenti;
-- integrazione con database aziendali reali;
-- aggiornamento automatico della Knowledge Base;
-- gestione dei permessi basata sui ruoli;
-- caricamento dinamico di documenti da parte degli utenti;
-- supporto multi-tenant;
-- integrazione con sistemi ERP o MES;
-- notifiche automatiche;
-- dashboard amministrative.
-
-Queste funzionalità potranno essere considerate come possibili evoluzioni future.
+L'esclusione mantiene il progetto focalizzato sulla dimostrazione dell'architettura AI Hybrid.
 
 ---
 
 ## 2.7 Vincoli del progetto
 
-Lo sviluppo del progetto dovrà rispettare i seguenti vincoli.
+Il progetto è stato sviluppato rispettando diversi vincoli tecnici e di dominio.
 
-### Vincoli funzionali
+### Fictional Business Context
 
-- Il sistema dovrà essere in grado di comprendere richieste formulate sia in italiano sia in inglese.
-- Le risposte relative alle procedure aziendali dovranno essere generate esclusivamente utilizzando le informazioni presenti nella Knowledge Base.
-- Le analisi numeriche dovranno essere eseguite esclusivamente sul dataset fornito.
-- Il sistema dovrà distinguere automaticamente tra richieste documentali, analitiche e ibride.
+Il sistema non utilizza dati aziendali riservati o documentazione interna di aziende reali.
 
-### Vincoli tecnologici
+Dataset e Knowledge Base sono stati creati specificamente per il progetto.
 
-Il progetto utilizzerà le seguenti tecnologie principali.
+### Local Architecture
 
-| Componente | Tecnologia |
-|------------|------------|
-| Frontend | React |
-| Backend | Node.js |
-| AI Orchestrator | OpenAI API |
-| Vector Database | ChromaDB |
-| Data Analysis | Python |
-| Librerie Python | Pandas, Matplotlib |
-| Dataset | CSV |
-| Versionamento | Git & GitHub |
+I principali servizi applicativi vengono eseguiti localmente durante sviluppo, testing e dimostrazione.
+
+### External AI Provider
+
+Le funzionalità di orchestrazione e embedding dipendono dalla disponibilità del provider OpenAI e da una configurazione API valida.
+
+### Controlled Analytical Scope
+
+Il Data Agent supporta un insieme definito di analisi.
+
+Non esegue arbitrariamente qualsiasi operazione Python richiesta dall'utente.
+
+Questa scelta rappresenta un vincolo intenzionale orientato a:
+
+- sicurezza;
+- stabilità;
+- riproducibilità;
+- testabilità.
+
+### In-Memory Conversation State
+
+Lo stato conversazionale viene mantenuto in memoria dal Backend.
+
+Un riavvio del servizio elimina le sessioni attive.
+
+### Synthetic Data
+
+Le analisi hanno valore dimostrativo e non rappresentano performance produttive reali.
+
+### Local Vector Database
+
+ChromaDB viene utilizzato localmente e non rappresenta un deployment distribuito production-grade.
 
 ---
 
 ## 2.8 Criteri di successo
 
-Il progetto sarà considerato completato con successo quando saranno soddisfatti i seguenti criteri.
+Il progetto viene considerato tecnicamente riuscito quando sono soddisfatti i seguenti criteri.
 
-### Obiettivi funzionali
+| ID | Criterio | Stato |
+|----|----------|-------|
+| SC-01 | Interfaccia conversazionale React funzionante | PASS |
+| SC-02 | Backend Node.js funzionante | PASS |
+| SC-03 | Python Data Agent separato e operativo | PASS |
+| SC-04 | Manufacturing Dataset con almeno 1000 righe | PASS |
+| SC-05 | Knowledge Base coerente con il business scenario | PASS |
+| SC-06 | Retrieval RAG tramite ChromaDB | PASS |
+| SC-07 | Routing autonomo tramite LLM function calling | PASS |
+| SC-08 | Analisi quantitativa tramite Pandas | PASS |
+| SC-09 | Generazione dei grafici | PASS |
+| SC-10 | Scenario RAG verificato | PASS |
+| SC-11 | Scenario Data Analysis verificato | PASS |
+| SC-12 | Scenario Hybrid verificato | PASS |
+| SC-13 | Conversazione multi-turn verificata | PASS |
+| SC-14 | Supporto italiano/inglese verificato | PASS |
+| SC-15 | Controlled failure del Data Agent | PASS |
+| SC-16 | Controlled failure di ChromaDB | PASS |
+| SC-17 | Test automatici Backend superati | PASS |
+| SC-18 | Build Backend e Frontend superate | PASS |
+| SC-19 | Documentazione tecnica as-built | PASS |
 
-- L'utente potrà porre domande in linguaggio naturale.
-- Il sistema selezionerà automaticamente il componente corretto.
-- Le richieste documentali utilizzeranno il motore RAG.
-- Le richieste analitiche utilizzeranno il Python Data Agent.
-- Le richieste ibride utilizzeranno entrambe le componenti.
-- I grafici saranno visualizzati direttamente all'interno dell'interfaccia.
-- Le fonti documentali saranno riportate nelle risposte generate tramite RAG.
+Restano separate dai criteri di successo del software le attività finali di consegna:
 
----
-
-### Obiettivi qualitativi
-
-Il progetto dovrà dimostrare:
-
-- modularità dell'architettura;
-- semplicità di utilizzo;
-- separazione delle responsabilità tra i componenti;
-- facilità di manutenzione;
-- possibilità di estensione futura;
-- documentazione completa;
-- codice leggibile e ben organizzato.
+- README finale;
+- presentazione;
+- clean clone verification;
+- packaging finale.
 
 ---
 
 ## 2.9 Evoluzioni future
 
-L'architettura è stata progettata per poter essere estesa senza modificare il nucleo dell'applicazione.
+L'architettura è stata progettata in modo da consentire evoluzioni successive senza modificare il principio fondamentale di separazione delle responsabilità.
 
-Tra le possibili evoluzioni future si individuano:
+### Authentication and RBAC
 
-- integrazione con database SQL;
-- connessione a sistemi ERP e MES;
-- autenticazione tramite provider esterni;
-- gestione di ruoli e permessi;
-- supporto a documenti PDF caricati dinamicamente;
-- dashboard manageriali;
-- generazione automatica di report PDF;
-- pianificazione di analisi periodiche;
-- integrazione con strumenti di Business Intelligence;
-- utilizzo di modelli AI specializzati per differenti domini aziendali.
+Una futura versione potrebbe introdurre:
 
----
+- autenticazione;
+- Single Sign-On;
+- Role-Based Access Control;
+- metadata filtering della Knowledge Base.
 
-# Conclusioni
+I documenti recuperabili potrebbero dipendere dal ruolo dell'utente.
 
-Maranello AI nasce con l'obiettivo di dimostrare come un'architettura basata su Intelligenza Artificiale possa semplificare l'accesso alla conoscenza aziendale e migliorare il processo decisionale attraverso l'integrazione tra documentazione e dati.
+### Persistent Conversation Memory
 
-Il progetto non si limita allo sviluppo di un semplice chatbot, ma propone una piattaforma modulare capace di orchestrare differenti strumenti specializzati all'interno di un'unica esperienza conversazionale.
+Lo stato in-memory potrebbe essere sostituito da un datastore persistente per supportare:
 
-Grazie all'utilizzo di Retrieval-Augmented Generation, analisi dati tramite Python e orchestrazione mediante Large Language Model, Maranello AI rappresenta un esempio concreto di applicazione enterprise delle moderne tecnologie di Intelligenza Artificiale.
+- riavvio dei servizi;
+- conversazioni di lunga durata;
+- più istanze Backend;
+- cronologia utente.
 
-La struttura modulare adottata consente inoltre di estendere facilmente il sistema con nuovi servizi, rendendo il progetto un'ottima base sia per finalità didattiche sia per possibili sviluppi professionali futuri.
+### Enterprise Data Sources
+
+Il Manufacturing Dataset locale potrebbe essere sostituito o integrato con:
+
+- SQL database;
+- data warehouse;
+- lakehouse;
+- MES;
+- ERP;
+- API aziendali.
+
+Il Data Agent manterrebbe il ruolo di boundary analitica.
+
+### Advanced Analytics
+
+Il motore analitico potrebbe essere esteso con:
+
+- analisi multidimensionali;
+- anomaly detection;
+- forecasting;
+- statistical testing;
+- root cause analysis;
+- predictive quality;
+- comparative dashboards.
+
+### Controlled Code Interpreter
+
+Una futura versione potrebbe introdurre un interprete Python più flessibile.
+
+Tale capacità richiederebbe:
+
+- sandboxing;
+- resource limits;
+- filesystem restrictions;
+- network restrictions;
+- code validation;
+- execution timeout;
+- result validation.
+
+La versione corrente evita intenzionalmente arbitrary code execution.
+
+### Advanced RAG
+
+La pipeline RAG potrebbe essere estesa con:
+
+- metadata filtering;
+- document versioning;
+- hybrid search;
+- reranking;
+- automated ingestion;
+- document approval workflow;
+- role-aware retrieval;
+- retrieval evaluation framework.
+
+### Observability
+
+Una versione production-grade potrebbe introdurre:
+
+- centralized logging;
+- metrics;
+- dashboards;
+- distributed tracing;
+- alerting;
+- LLM token monitoring;
+- tool usage metrics;
+- retrieval quality monitoring.
+
+### Automated Testing
+
+Il processo QA potrebbe essere esteso con:
+
+- Frontend unit testing;
+- component testing;
+- browser E2E automation;
+- automated LLM evaluation;
+- performance testing;
+- load testing;
+- security scanning.
+
+### Deployment
+
+Una futura evoluzione potrebbe prevedere:
+
+- containerizzazione;
+- Docker Compose;
+- cloud deployment;
+- CI/CD;
+- managed vector database;
+- object storage per i grafici;
+- horizontal scaling.
+
+Queste evoluzioni non sono necessarie per dimostrare gli obiettivi della versione corrente, ma mostrano come l'architettura possa essere estesa verso un contesto enterprise più completo.
 
 ---
 
@@ -536,9 +1288,10 @@ La struttura modulare adottata consente inoltre di estendere facilmente il siste
 | Informazione | Valore |
 |--------------|--------|
 | Documento | Project Vision and Scope |
-| Versione | 1.0 |
-| Stato | Draft |
+| Versione | 2.0 |
+| Stato | Final |
+| Tipologia | As-Built Vision & Scope |
 | Lingua | Italiano |
-| Prossimo documento | 02_Software_Requirements_Specification.md |
+| Ultimo aggiornamento | Settembre 2026 |
 
 ---
