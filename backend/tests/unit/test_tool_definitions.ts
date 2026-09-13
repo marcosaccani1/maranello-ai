@@ -86,6 +86,76 @@ describe(
 
 
     it(
+      "describes direct execution for supported manufacturing analyses",
+      () => {
+        expect(
+          ANALYZE_MANUFACTURING_DATA_TOOL.description,
+        ).toContain(
+          "Use this tool directly",
+        );
+
+        expect(
+          ANALYZE_MANUFACTURING_DATA_TOOL.description,
+        ).toContain(
+          "available structured manufacturing dataset",
+        );
+
+        expect(
+          ANALYZE_MANUFACTURING_DATA_TOOL.description,
+        ).toContain(
+          "do not require",
+        );
+      },
+    );
+
+
+    it(
+      "uses the available manufacturing dataset as the default scope",
+      () => {
+        const questionProperty =
+          ANALYZE_MANUFACTURING_DATA_TOOL
+            .parameters
+            .properties
+            .question;
+
+        expect(
+          questionProperty,
+        ).toBeDefined();
+
+        expect(
+          questionProperty?.description,
+        ).toContain(
+          "Use the available manufacturing dataset as the default scope.",
+        );
+
+        expect(
+          questionProperty?.description,
+        ).toContain(
+          "Do not introduce",
+        );
+      },
+    );
+
+
+    it(
+      "preserves the user's analytical scope",
+      () => {
+        expect(
+          ANALYZE_MANUFACTURING_DATA_TOOL.description,
+        ).toContain(
+          "Preserve the user's analytical scope exactly.",
+        );
+
+        expect(
+          ANALYZE_MANUFACTURING_DATA_TOOL.description,
+        ).toContain(
+          "unless the user explicitly requested it",
+        );
+      },
+    );
+
+
+    it(
       "exposes exactly the supported tools",
       () => {
         expect(

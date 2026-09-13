@@ -911,7 +911,6 @@ Before running Maranello AI locally, install the following software:
 - npm
 - Python 3.12 or later
 - pip
-- ChromaDB CLI
 
 An active OpenAI API key is also required for:
 
@@ -934,11 +933,26 @@ through:
 
     data_agent/pyproject.toml
 
+Before creating the Python virtual environment, verify the interpreter version:
+
+    python3 --version
+
+The reported version must be Python 3.12 or later.
+
+On systems where `python3` points to an older interpreter, use an explicitly versioned executable such as:
+
+    python3.12 --version
+
+and use that same executable when creating the virtual environment.
+
+ChromaDB is installed later inside the project Python virtual environment. A separate global ChromaDB installation is not required.
+
 The final project was validated using:
 
     Node.js 24.15.0
     npm 11.12.1
-    Python 3.12
+    Python 3.12.13
+    ChromaDB CLI 1.4.4
 
 Using compatible versions that satisfy the declared requirements is recommended.
 
@@ -948,8 +962,8 @@ Using compatible versions that satisfy the declared requirements is recommended.
 
 Clone the repository and enter the project root:
 
-    git clone <repository-url>
-    cd <repository-directory>
+    git clone https://github.com/marcosaccani1/maranello-ai.git
+    cd maranello-ai
 
 All commands in the following sections assume that the current directory is the repository root unless explicitly stated otherwise.
 
@@ -966,6 +980,22 @@ The repository provides:
 Create the local environment file:
 
     cp .env.example .env
+
+The root .env file configures the Node.js Backend and its external service integrations.
+
+The React Frontend uses a default local Backend URL and therefore does not require a separate environment file for the standard local setup.
+
+An optional Frontend environment template is provided at:
+
+    frontend/.env.example
+
+To override the default Frontend API URL, create:
+
+    cp frontend/.env.example frontend/.env
+
+The supported Frontend variable is:
+
+    VITE_API_URL=http://127.0.0.1:3000
 
 Then configure the required values inside:
 
@@ -1083,17 +1113,32 @@ The Data Agent requires:
 
     Python >= 3.12
 
-Create a virtual environment from the repository root:
+Before creating the virtual environment, verify the Python interpreter:
+
+    python3 --version
+
+If the reported version is Python 3.12 or later, create the virtual environment from the repository root with:
 
     python3 -m venv .venv
 
-Activate it on macOS or Linux:
+If `python3` points to an older interpreter but Python 3.12 is installed, use the versioned executable instead:
+
+    python3.12 --version
+    python3.12 -m venv .venv
+
+Activate the environment on macOS or Linux:
 
     source .venv/bin/activate
 
 On Windows PowerShell:
 
     .venv\Scripts\Activate.ps1
+
+Verify that the active environment uses a supported interpreter:
+
+    python --version
+
+The reported version must be Python 3.12 or later.
 
 Upgrade pip:
 
@@ -1103,7 +1148,17 @@ Install the Data Agent together with its development and testing dependencies:
 
     python -m pip install -e "./data_agent[dev]"
 
-This command uses the actual `pyproject.toml` configuration. No separate `requirements.txt` is required.
+Install the ChromaDB CLI in the same virtual environment:
+
+    python -m pip install chromadb
+
+Verify that the ChromaDB CLI is available:
+
+    chroma --version
+
+This setup keeps the Python Data Agent and ChromaDB CLI isolated inside the project virtual environment.
+
+The Data Agent installation command uses the actual `pyproject.toml` configuration. No separate `requirements.txt` is required.
 
 Runtime dependencies include:
 
@@ -1145,7 +1200,7 @@ The validated project state passes all four checks.
 The final Backend automated test suite contains:
 
     15 test files
-    86 tests
+    89 tests
 
 Return to the repository root:
 
@@ -1177,12 +1232,15 @@ Return to the repository root:
 With the Python virtual environment activated, run from the repository root:
 
     python -m pytest data_agent/tests
+    ruff check data_agent
 
-The Python project also uses Ruff.
+The Python project uses Ruff for static linting and code-quality verification.
 
 Its linting and formatting configuration is defined in:
 
     data_agent/pyproject.toml
+
+Both the automated test suite and Ruff checks pass in the validated project state.
 
 ---
 
@@ -1240,6 +1298,22 @@ Starting the infrastructure dependencies first makes service availability easier
 # Start ChromaDB
 
 Activate the Python virtual environment if it is not already active.
+
+On macOS or Linux:
+
+    source .venv/bin/activate
+
+On Windows PowerShell:
+
+    .venv\Scripts\Activate.ps1
+
+If ChromaDB has not yet been installed in the virtual environment, install it with:
+
+    python -m pip install chromadb
+
+Verify that the CLI is available:
+
+    chroma --version
 
 From the repository root, start the local ChromaDB server:
 
@@ -2303,7 +2377,7 @@ The Node.js Backend includes an automated test suite covering the main applicati
 The final validated Backend test suite contains:
 
     15 test files
-    86 tests
+    89 tests
 
 All tests pass in the validated project state.
 
@@ -2588,6 +2662,18 @@ the final quality workflow includes:
 
     npm run lint
     npm run build
+
+These commands were successfully executed against the validated project state.
+
+---
+
+## Python Data Agent
+
+From the repository root, with the Python virtual environment activated, the final quality workflow includes:
+
+    python -m pytest data_agent/tests
+
+    ruff check data_agent
 
 These commands were successfully executed against the validated project state.
 
@@ -3094,7 +3180,7 @@ The root README provides the entry point for installation, execution and high-le
 
 # Project Status
 
-The core Maranello AI software implementation is complete.
+The Maranello AI implementation and final validation activities are complete.
 
 The final application includes:
 
@@ -3104,6 +3190,7 @@ The final application includes:
 | Synthetic Manufacturing Dataset | Completed |
 | Dataset cleaning pipeline | Completed |
 | Fictional enterprise Knowledge Base | Completed |
+| Consolidated Knowledge Base PDF | Completed |
 | Knowledge Base chunking and indexing | Completed |
 | ChromaDB integration | Completed |
 | Multilingual semantic retrieval | Completed |
@@ -3125,22 +3212,15 @@ The final application includes:
 | Controlled dependency failures | Completed |
 | Backend automated test suite | Completed |
 | Frontend quality verification | Completed |
+| Python quality verification | Completed |
 | Manual end-to-end QA | Completed |
 | As-built technical documentation | Completed |
+| Final project presentation | Completed |
+| Clean-clone validation | Completed |
 
-Remaining final-delivery activities are intentionally separated from software implementation:
+The project is therefore ready for final delivery.
 
-    Root README final verification
-            ↓
-    Documentation index verification
-            ↓
-    Final presentation
-            ↓
-    Clean-clone validation
-            ↓
-    Delivery packaging
-
-These activities validate and present the completed system rather than introduce new core functionality.
+The remaining activity is the external submission and packaging of the required project artifacts.
 
 ---
 
@@ -3522,17 +3602,23 @@ The final architecture is therefore the result of iterative design rather than a
 
 # Final Validation
 
-Before final project delivery, the repository will undergo a clean-clone verification.
+Before final delivery, Maranello AI was validated from a fresh repository clone using only the installation and execution procedure documented in this README.
 
-The validation process will start from a fresh repository clone and follow only the instructions documented in this README.
-
-The objective is to verify that a new environment can:
+The clean-clone validation confirmed the complete setup workflow:
 
     Clone Repository
           ↓
     Configure Environment
           ↓
-    Install Dependencies
+    Install Backend Dependencies
+          ↓
+    Install Frontend Dependencies
+          ↓
+    Create Python 3.12 Virtual Environment
+          ↓
+    Install Python Data Agent Dependencies
+          ↓
+    Install ChromaDB CLI
           ↓
     Start ChromaDB
           ↓
@@ -3544,17 +3630,69 @@ The objective is to verify that a new environment can:
           ↓
     Start React Frontend
           ↓
-    Execute RAG Request
-          ↓
-    Execute Data Request
-          ↓
-    Execute Hybrid Request
-          ↓
-    Render Chart
-          ↓
-    Run Quality Checks
+    Execute End-to-End Verification
 
-Any missing, incorrect or ambiguous setup instruction identified during this process will be corrected before final delivery.
+The clean environment successfully verified:
+
+- Node.js Backend dependency installation and startup;
+- React Frontend dependency installation and startup;
+- Python 3.12 Data Agent environment creation;
+- ChromaDB CLI installation and local server startup;
+- Knowledge Base ingestion with 5 documents and 149 indexed chunks;
+- Python Data Agent health and analytical execution;
+- Node.js Backend health and orchestration;
+- React conversational interface;
+- Retrieval-Augmented Generation;
+- manufacturing data analysis;
+- monthly defect-rate analysis with native chart rendering;
+- Hybrid execution combining structured data and Knowledge Base evidence;
+- multi-turn conversation memory;
+- autonomous LLM tool selection without a separate rule-based classifier.
+
+The final quality checks executed successfully include:
+
+    Backend
+    15 test files
+    89 tests
+    TypeScript type checking
+    ESLint verification
+    Production build
+
+    Frontend
+    ESLint verification
+    Production build
+
+    Python Data Agent
+    66 automated tests
+    Ruff verification
+
+During clean-clone validation, the setup documentation was also improved to explicitly verify the Python interpreter version and document the ChromaDB CLI installation procedure.
+
+The analytical orchestration instructions were additionally refined after end-to-end testing showed that a supported manufacturing request could trigger unnecessary clarification. The final behavior was revalidated using the request:
+
+    Show me the monthly defect rate trend.
+
+The system now autonomously invokes the Manufacturing Data Agent, calculates the monthly trend and renders the resulting chart without requiring unnecessary additional input.
+
+A final Hybrid validation used:
+
+    Which supplier has the highest defect rate,
+    and how should that result be classified
+    according to the Supplier Quality Procedure?
+
+The system correctly combined structured manufacturing analysis and Knowledge Base retrieval, identifying:
+
+    SUP-07
+    defect rate: 2.99%
+    classification: Observation
+
+Conversation continuity was then verified with:
+
+    What does the policy require for that supplier?
+
+The system correctly resolved the contextual reference to SUP-07 and retrieved the corresponding Supplier Quality Procedure requirements.
+
+The clean-clone procedure therefore confirms that the repository can be installed, started and exercised from a fresh environment using the documented setup instructions.
 
 ---
 

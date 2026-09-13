@@ -90,10 +90,15 @@ ToolDefinition = {
     TOOL_NAMES.analyzeManufacturingData,
 
   description:
-    "Analyze structured manufacturing data to calculate "
-    + "KPIs, defect rates, trends, comparisons, supplier "
-    + "performance, production-line performance, shifts, "
+    "Analyze the available structured manufacturing dataset "
+    + "to calculate KPIs, defect rates, trends, comparisons, "
+    + "supplier performance, production-line performance, shifts, "
     + "components, models, plants, teams, and charts. "
+    + "Use this tool directly when the user's requested analysis "
+    + "is already supported by these capabilities; do not require "
+    + "an additional time range, grouping dimension, comparison "
+    + "period, dataset scope, or output format unless that "
+    + "information is genuinely required to execute the request. "
     + "Preserve the user's analytical scope exactly. "
     + "Do not add a time period, trend analysis, comparison "
     + "period, grouping dimension, or other analytical "
@@ -109,11 +114,12 @@ ToolDefinition = {
         type: "string",
         description:
           "The manufacturing analysis requested by the user. "
-          + "Keep the question focused on exactly the requested "
-          + "metric and dimensions. Do not introduce time periods, "
-          + "historical trends, prior-period comparisons, or other "
-          + "constraints unless they were explicitly requested "
-          + "by the user.",
+          + "Use the available manufacturing dataset as the "
+          + "default scope. Keep the question focused on exactly "
+          + "the requested metric and dimensions. Do not introduce "
+          + "time periods, historical trends, prior-period "
+          + "comparisons, grouping dimensions, or other constraints "
+          + "unless they were explicitly requested by the user.",
       },
     },
 
