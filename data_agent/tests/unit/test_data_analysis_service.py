@@ -9,21 +9,33 @@ from app.models.analysis import (
     MonthlyTrendMetric,
 )
 from app.services.data_analysis_service import DataAnalysisService
+from app.services.dataset_repository import DatasetRepository
 
 
-class FakeLoader:
-    def __init__(self, dataframe: pd.DataFrame) -> None:
+class CountingLoader:
+    def __init__(
+        self,
+        dataframe: pd.DataFrame,
+    ) -> None:
         self.dataframe = dataframe
+        self.load_calls = 0
 
     def load(self) -> pd.DataFrame:
+        self.load_calls += 1
+
         return self.dataframe.copy()
 
 
-class FakeCleaner:
+class CountingCleaner:
+    def __init__(self) -> None:
+        self.clean_calls = 0
+
     def clean(
         self,
         dataframe: pd.DataFrame,
     ) -> pd.DataFrame:
+        self.clean_calls += 1
+
         return dataframe.copy()
 
 
@@ -88,7 +100,10 @@ class FakeAnalysisService:
 
 
 class FakeChartService:
-    def __init__(self, output_path: Path) -> None:
+    def __init__(
+        self,
+        output_path: Path,
+    ) -> None:
         self.output_path = output_path
 
     def create_monthly_defect_rate_chart(
@@ -100,11 +115,23 @@ class FakeChartService:
 
 def build_service(
     tmp_path: Path,
-) -> DataAnalysisService:
+) -> tuple[
+    DataAnalysisService,
+    CountingLoader,
+    CountingCleaner,
+]:
     dataframe = pd.DataFrame(
         {
             "example": [1],
         }
+    )
+
+    loader = CountingLoader(dataframe)
+    cleaner = CountingCleaner()
+
+    repository = DatasetRepository(
+        loader=loader,
+        cleaner=cleaner,
     )
 
     chart_path = (
@@ -112,20 +139,23 @@ def build_service(
         / "monthly_defect_rate_test.png"
     )
 
-    return DataAnalysisService(
-        loader=FakeLoader(dataframe),
-        cleaner=FakeCleaner(),
+    service = DataAnalysisService(
+        dataset_repository=repository,
         analysis_service=FakeAnalysisService(),
         chart_service=FakeChartService(
             chart_path
         ),
     )
 
+    return service, loader, cleaner
+
 
 def test_execute_global_kpis_returns_expected_result(
     tmp_path: Path,
 ) -> None:
-    service = build_service(tmp_path)
+    service, _, _ = build_service(
+        tmp_path
+    )
 
     result = service.execute(
         analysis_type="global_kpis"
@@ -153,7 +183,9 @@ def test_execute_global_kpis_returns_expected_result(
 def test_execute_grouped_defect_rate_returns_expected_result(
     tmp_path: Path,
 ) -> None:
-    service = build_service(tmp_path)
+    service, _, _ = build_service(
+        tmp_path
+    )
 
     result = service.execute(
         analysis_type="grouped_defect_rate",
@@ -185,7 +217,9 @@ def test_execute_grouped_defect_rate_returns_expected_result(
 def test_execute_grouped_defect_rate_requires_dimension(
     tmp_path: Path,
 ) -> None:
-    service = build_service(tmp_path)
+    service, _, _ = build_service(
+        tmp_path
+    )
 
     with pytest.raises(
         ValueError,
@@ -201,7 +235,9 @@ def test_execute_grouped_defect_rate_requires_dimension(
 def test_execute_monthly_trend_returns_chart_url(
     tmp_path: Path,
 ) -> None:
-    service = build_service(tmp_path)
+    service, _, _ = build_service(
+        tmp_path
+    )
 
     result = service.execute(
         analysis_type="monthly_trend"
@@ -230,7 +266,9 @@ def test_execute_monthly_trend_returns_chart_url(
 def test_execute_raises_error_for_unsupported_analysis_type(
     tmp_path: Path,
 ) -> None:
-    service = build_service(tmp_path)
+    service, _, _ = build_service(
+        tmp_path
+    )
 
     with pytest.raises(
         ValueError,
@@ -239,3 +277,48 @@ def test_execute_raises_error_for_unsupported_analysis_type(
         service.execute(
             analysis_type="unsupported",
         )
+
+
+def test_multiple_analyses_reuse_prepared_dataset(
+    tmp_path: Path,
+) -> None:
+    service, loader, cleaner = build_service(
+        tmp_path
+    )
+
+    service.execute(
+        analysis_type="global_kpis"
+    )
+
+    service.execute(
+        analysis_type="grouped_defect_rate",
+        dimension="production_line",
+    )
+
+    service.execute(
+        analysis_type="monthly_trend"
+    )
+
+    assert loader.load_calls == 1
+    assert cleaner.clean_calls == 1
+
+
+def test_reload_dataset_rebuilds_prepared_dataset(
+    tmp_path: Path,
+) -> None:
+    service, loader, cleaner = build_service(
+        tmp_path
+    )
+
+    service.execute(
+        analysis_type="global_kpis"
+    )
+
+    service.reload_dataset()
+
+    service.execute(
+        analysis_type="global_kpis"
+    )
+
+    assert loader.load_calls == 2
+    assert cleaner.clean_calls == 2

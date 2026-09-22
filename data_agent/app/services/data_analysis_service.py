@@ -8,6 +8,7 @@ from app.services.analysis_service import AnalysisService
 from app.services.chart_service import ChartService
 from app.services.data_cleaner import DataCleaner
 from app.services.data_loader import DataLoader
+from app.services.dataset_repository import DatasetRepository
 from app.services.question_interpreter import QuestionInterpreter
 
 AnalysisType = Literal[
@@ -20,25 +21,32 @@ AnalysisType = Literal[
 class DataAnalysisService:
     def __init__(
         self,
-        loader: DataLoader | None = None,
-        cleaner: DataCleaner | None = None,
+        dataset_repository: DatasetRepository | None = None,
         analysis_service: AnalysisService | None = None,
         chart_service: ChartService | None = None,
         question_interpreter: QuestionInterpreter | None = None,
     ) -> None:
-        self.loader = loader or DataLoader(
-            settings.dataset_path
+        self.dataset_repository = (
+            dataset_repository
+            or DatasetRepository(
+                loader=DataLoader(
+                    settings.dataset_path
+                ),
+                cleaner=DataCleaner(),
+            )
         )
-        self.cleaner = cleaner or DataCleaner()
+
         self.analysis_service = (
             analysis_service or AnalysisService()
         )
+
         self.chart_service = (
             chart_service
             or ChartService(
                 settings.charts_directory
             )
         )
+
         self.question_interpreter = (
             question_interpreter
             or QuestionInterpreter()
@@ -62,24 +70,30 @@ class DataAnalysisService:
         analysis_type: AnalysisType,
         dimension: str | None = None,
     ) -> AnalysisResult:
-        dataframe = self.loader.load()
-        cleaned = self.cleaner.clean(dataframe)
+        dataframe = self.dataset_repository.get()
 
         if analysis_type == "global_kpis":
-            return self._global_kpis(cleaned)
+            return self._global_kpis(dataframe)
 
         if analysis_type == "grouped_defect_rate":
             return self._grouped_defect_rate(
-                cleaned,
+                dataframe,
                 dimension,
             )
 
         if analysis_type == "monthly_trend":
-            return self._monthly_trend(cleaned)
+            return self._monthly_trend(
+                dataframe
+            )
 
         raise ValueError(
             f"Unsupported analysis type: {analysis_type}"
         )
+
+    def reload_dataset(
+        self,
+    ) -> pd.DataFrame:
+        return self.dataset_repository.reload()
 
     def _global_kpis(
         self,
