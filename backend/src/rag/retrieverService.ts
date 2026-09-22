@@ -37,10 +37,12 @@ interface ChromaClientProvider {
 
 export interface RetrieverOptions {
   topK?: number;
+  maxDistance?: number;
 }
 
 
 const DEFAULT_TOP_K = 5;
+const DEFAULT_MAX_DISTANCE = 0.7;
 
 
 function asString(
@@ -65,6 +67,7 @@ function asNumber(
 
 export class RetrieverService {
   private readonly topK: number;
+  private readonly maxDistance: number;
 
   constructor(
     private readonly chromaClient: ChromaClientProvider =
@@ -75,12 +78,25 @@ export class RetrieverService {
       options.topK
       ?? DEFAULT_TOP_K;
 
+    this.maxDistance =
+      options.maxDistance
+      ?? DEFAULT_MAX_DISTANCE;
+
     if (
       !Number.isInteger(this.topK)
       || this.topK <= 0
     ) {
       throw new Error(
         "Retriever topK must be a positive integer.",
+      );
+    }
+
+    if (
+      !Number.isFinite(this.maxDistance)
+      || this.maxDistance < 0
+    ) {
+      throw new Error(
+        "Retriever maxDistance must be a non-negative finite number.",
       );
     }
   }
@@ -131,11 +147,19 @@ export class RetrieverService {
           return [];
         }
 
-        const metadata =
-          metadatas[index] ?? {};
-
         const distance =
           distances[index];
+
+        if (
+          typeof distance !== "number"
+          || !Number.isFinite(distance)
+          || distance > this.maxDistance
+        ) {
+          return [];
+        }
+
+        const metadata =
+          metadatas[index] ?? {};
 
         return [
           {
@@ -153,10 +177,7 @@ export class RetrieverService {
               metadata.chunkIndex,
               index,
             ),
-            distance:
-              typeof distance === "number"
-                ? distance
-                : null,
+            distance,
           },
         ];
       },
