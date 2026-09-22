@@ -4,9 +4,13 @@ import type {
   Response,
 } from "express";
 
+import {
+  setChatObservabilityMetadata,
+} from "../middleware/chatObservability.js";
+
 import type {
+  ChatExecutionResult,
   ChatRequest,
-  ChatResult,
 } from "../models/chat.js";
 
 
@@ -14,7 +18,7 @@ export interface ChatServiceProvider {
   sendMessage(
     message: string,
     sessionId?: string,
-  ): Promise<ChatResult>;
+  ): Promise<ChatExecutionResult>;
 }
 
 
@@ -81,14 +85,25 @@ export function createChatController(
         return;
       }
 
-      const result =
+      const execution =
         await chatService.sendMessage(
           body.message,
           body.sessionId,
         );
 
+      setChatObservabilityMetadata(
+        response,
+        {
+          toolsUsed:
+            execution.result.toolsUsed,
+
+          tokenUsage:
+            execution.tokenUsage,
+        },
+      );
+
       response.status(200).json(
-        result,
+        execution.result,
       );
     } catch (error) {
       if (

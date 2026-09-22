@@ -87,6 +87,12 @@ describe(
                 toolsUsed: [
                   "search_knowledge_base",
                 ],
+
+                tokenUsage: {
+                  inputTokens: 10,
+                  outputTokens: 5,
+                  totalTokens: 15,
+                },
               }),
         };
 
@@ -116,18 +122,31 @@ describe(
         );
 
         expect(result).toEqual({
-          sessionId:
-            "session-1",
+          result: {
+            sessionId:
+              "session-1",
 
-          responseId:
-            "response-1",
+            responseId:
+              "response-1",
 
-          answer:
-            "The critical threshold is above 3.5%.",
+            answer:
+              "The critical threshold is above 3.5%.",
 
-          toolsUsed: [
-            "search_knowledge_base",
-          ],
+            toolsUsed: [
+              "search_knowledge_base",
+            ],
+          },
+
+          tokenUsage: {
+            inputTokens:
+              10,
+
+            outputTokens:
+              5,
+
+            totalTokens:
+              15,
+          },
         });
       },
     );
@@ -158,6 +177,12 @@ describe(
                   "Follow-up completed.",
 
                 toolsUsed: [],
+
+                tokenUsage: {
+                  inputTokens: 10,
+                  outputTokens: 5,
+                  totalTokens: 15,
+                },
               }),
         };
 
@@ -206,6 +231,12 @@ describe(
                 toolsUsed: [
                   "analyze_manufacturing_data",
                 ],
+
+                tokenUsage: {
+                  inputTokens: 10,
+                  outputTokens: 5,
+                  totalTokens: 15,
+                },
               }),
         };
 
@@ -255,6 +286,12 @@ describe(
                   "analyze_manufacturing_data",
                 ],
 
+                tokenUsage: {
+                  inputTokens: 10,
+                  outputTokens: 5,
+                  totalTokens: 15,
+                },
+
                 chartUrl:
                   "/charts/monthly_defect_rate_test.png",
               }),
@@ -272,7 +309,7 @@ describe(
           );
 
         expect(
-          result.chartUrl,
+          result.result.chartUrl,
         ).toBe(
           "/api/charts/monthly_defect_rate_test.png",
         );
@@ -306,6 +343,12 @@ describe(
                 toolsUsed: [
                   "analyze_manufacturing_data",
                 ],
+
+                tokenUsage: {
+                  inputTokens: 10,
+                  outputTokens: 5,
+                  totalTokens: 15,
+                },
               }),
         };
 
@@ -329,7 +372,7 @@ describe(
         );
 
         expect(
-          result.sessionId,
+          result.result.sessionId,
         ).toBe(
           "existing-session",
         );
@@ -361,6 +404,12 @@ describe(
                 toolsUsed: [
                   "analyze_manufacturing_data",
                 ],
+
+                tokenUsage: {
+                  inputTokens: 10,
+                  outputTokens: 5,
+                  totalTokens: 15,
+                },
               }),
         };
 
@@ -419,6 +468,12 @@ describe(
                   "Done.",
 
                 toolsUsed: [],
+
+                tokenUsage: {
+                  inputTokens: 10,
+                  outputTokens: 5,
+                  totalTokens: 15,
+                },
               }),
         };
 

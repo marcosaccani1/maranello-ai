@@ -80,6 +80,13 @@ describe(
             "Hello from Maranello AI.",
 
           toolsUsed: [],
+
+          tokenUsage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+          },
+
         });
 
         expect(
@@ -310,6 +317,13 @@ describe(
           toolsUsed: [
             TOOL_NAMES.searchKnowledgeBase,
           ],
+
+          tokenUsage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+          },
+
         });
       },
     );
@@ -529,8 +543,132 @@ describe(
             TOOL_NAMES.analyzeManufacturingData,
           ],
 
+          tokenUsage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+          },
+
           chartUrl:
             "/charts/monthly_defect_rate_test.png",
+        });
+      },
+    );
+
+
+    it(
+      "aggregates token usage across multiple OpenAI responses",
+      async () => {
+        const firstResponse =
+          createResponse({
+            id:
+              "response-usage-tool",
+
+            usage: {
+              input_tokens:
+                100,
+
+              output_tokens:
+                20,
+
+              total_tokens:
+                120,
+            } as OpenAI.Responses.ResponseUsage,
+
+            output: [
+              {
+                type:
+                  "function_call",
+
+                id:
+                  "usage-call-item",
+
+                call_id:
+                  "usage-call-1",
+
+                name:
+                  TOOL_NAMES.searchKnowledgeBase,
+
+                arguments:
+                  JSON.stringify({
+                    question:
+                      "What is the critical defect rate threshold?",
+                  }),
+
+                status:
+                  "completed",
+              },
+            ],
+          });
+
+        const finalResponse =
+          createResponse({
+            id:
+              "response-usage-final",
+
+            usage: {
+              input_tokens:
+                200,
+
+              output_tokens:
+                30,
+
+              total_tokens:
+                230,
+            } as OpenAI.Responses.ResponseUsage,
+
+            output_text:
+              "The threshold is defined by policy.",
+          });
+
+        const responses = {
+          create: vi.fn()
+            .mockResolvedValueOnce(
+              firstResponse,
+            )
+            .mockResolvedValueOnce(
+              finalResponse,
+            ),
+        };
+
+        const toolExecutor = {
+          execute: vi.fn()
+            .mockResolvedValue({
+              toolName:
+                TOOL_NAMES.searchKnowledgeBase,
+
+              data: [],
+            }),
+        };
+
+        const orchestrator =
+          new AIOrchestrator(
+            {
+              responses,
+            },
+            toolExecutor,
+          );
+
+        const result =
+          await orchestrator.run(
+            "What is the critical defect rate threshold?",
+          );
+
+        expect(
+          responses.create,
+        ).toHaveBeenCalledTimes(2);
+
+        expect(
+          result.tokenUsage,
+        ).toEqual({
+          inputTokens:
+            300,
+
+          outputTokens:
+            50,
+
+          totalTokens:
+            350,
         });
       },
     );
@@ -689,6 +827,107 @@ describe(
           ),
         ).rejects.toThrow(
           "OpenAI response did not complete successfully",
+        );
+      },
+    );
+
+
+    it(
+      "stops when the maximum number of tool-calling rounds is exceeded",
+      async () => {
+        const toolResponses =
+          Array.from(
+            {
+              length: 6,
+            },
+            (_, index) =>
+              createResponse({
+                id:
+                  `response-tool-round-${index + 1}`,
+
+                output: [
+                  {
+                    type:
+                      "function_call",
+
+                    id:
+                      `call-item-${index + 1}`,
+
+                    call_id:
+                      `call-${index + 1}`,
+
+                    name:
+                      TOOL_NAMES.searchKnowledgeBase,
+
+                    arguments:
+                      JSON.stringify({
+                        question:
+                          "Continue searching the knowledge base.",
+                      }),
+
+                    status:
+                      "completed",
+                  },
+                ],
+              }),
+          );
+
+        const responses = {
+          create: vi.fn(),
+        };
+
+        for (
+          const response
+          of toolResponses
+        ) {
+          responses.create
+            .mockResolvedValueOnce(
+              response,
+            );
+        }
+
+        const toolExecutor = {
+          execute: vi.fn()
+            .mockResolvedValue({
+              toolName:
+                TOOL_NAMES.searchKnowledgeBase,
+
+              data: [],
+            }),
+        };
+
+        const orchestrator =
+          new AIOrchestrator(
+            {
+              responses,
+            },
+            toolExecutor,
+          );
+
+        await expect(
+          orchestrator.run(
+            "Keep searching indefinitely.",
+          ),
+        ).rejects.toThrow(
+          "Maximum tool-calling rounds exceeded (5).",
+        );
+
+        expect(
+          responses.create,
+        ).toHaveBeenCalledTimes(6);
+
+        expect(
+          toolExecutor.execute,
+        ).toHaveBeenCalledTimes(5);
+
+        expect(
+          toolExecutor.execute,
+        ).toHaveBeenLastCalledWith(
+          TOOL_NAMES.searchKnowledgeBase,
+          {
+            question:
+              "Continue searching the knowledge base.",
+          },
         );
       },
     );

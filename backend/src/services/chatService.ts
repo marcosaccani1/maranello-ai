@@ -13,7 +13,7 @@ import {
 } from "../conversation/conversationManager.js";
 
 import type {
-  ChatResult,
+  ChatExecutionResult,
 } from "../models/chat.js";
 
 
@@ -96,7 +96,7 @@ export class ChatService {
   async sendMessage(
     message: string,
     sessionId?: string,
-  ): Promise<ChatResult> {
+  ): Promise<ChatExecutionResult> {
     const normalizedMessage =
       message.trim();
 
@@ -124,7 +124,7 @@ export class ChatService {
           normalizedSessionId,
         );
 
-    const result =
+    const orchestrationResult =
       await this.orchestrator.run(
         normalizedMessage,
         session.previousResponseId
@@ -142,39 +142,45 @@ export class ChatService {
       .addMessage(
         session.id,
         "assistant",
-        result.answer,
+        orchestrationResult.answer,
       );
 
     this.conversationManager
       .setPreviousResponseId(
         session.id,
-        result.responseId,
+        orchestrationResult.responseId,
       );
 
     const chartUrl =
       toPublicChartUrl(
-        result.chartUrl,
+        orchestrationResult.chartUrl,
       );
 
     return {
-      sessionId:
-        session.id,
+      result: {
+        sessionId:
+          session.id,
 
-      responseId:
-        result.responseId,
+        responseId:
+          orchestrationResult.responseId,
 
-      answer:
-        result.answer,
+        answer:
+          orchestrationResult.answer,
 
-      toolsUsed: [
-        ...result.toolsUsed,
-      ],
+        toolsUsed: [
+          ...orchestrationResult.toolsUsed,
+        ],
 
-      ...(chartUrl
-        ? {
-            chartUrl,
-          }
-        : {}),
+        ...(chartUrl
+          ? {
+              chartUrl,
+            }
+          : {}),
+      },
+
+      tokenUsage: {
+        ...orchestrationResult.tokenUsage,
+      },
     };
   }
 }

@@ -1,3 +1,7 @@
+import type {
+  RequestHandler,
+} from "express";
+
 import {
   Router,
 } from "express";
@@ -11,6 +15,18 @@ import type {
 } from "../controllers/chatController.js";
 
 import {
+  createChatObservabilityMiddleware,
+} from "../middleware/chatObservability.js";
+
+import type {
+  ChatLogWriter,
+} from "../middleware/chatObservability.js";
+
+import {
+  createChatRateLimiter,
+} from "../middleware/chatRateLimiter.js";
+
+import {
   ChatService,
 } from "../services/chatService.js";
 
@@ -18,12 +34,27 @@ import {
 export function createChatRouter(
   providedChatService?:
   ChatServiceProvider,
+
+  providedRateLimiter?:
+  RequestHandler,
+
+  providedLogWriter?:
+  ChatLogWriter,
 ): Router {
   const router =
     Router();
 
   let chatService =
     providedChatService;
+
+  const observabilityMiddleware =
+    createChatObservabilityMiddleware(
+      providedLogWriter,
+    );
+
+  const rateLimiter =
+    providedRateLimiter
+    ?? createChatRateLimiter();
 
 
   function getChatService():
@@ -39,6 +70,8 @@ export function createChatRouter(
 
   router.post(
     "/",
+    observabilityMiddleware,
+    rateLimiter,
     (request, response, next) => {
       const controller =
         createChatController(

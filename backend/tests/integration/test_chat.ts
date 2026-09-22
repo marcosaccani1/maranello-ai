@@ -1,4 +1,5 @@
 import express from "express";
+
 import {
   afterEach,
   describe,
@@ -7,9 +8,33 @@ import {
   vi,
 } from "vitest";
 
+import type {
+  StructuredChatLog,
+} from "../../src/middleware/chatObservability.js";
+
+import {
+  createChatRateLimiter,
+} from "../../src/middleware/chatRateLimiter.js";
+
 import {
   createChatRouter,
 } from "../../src/routes/chatRoutes.js";
+
+
+function createTokenUsage() {
+  return {
+    inputTokens: 100,
+    outputTokens: 25,
+    totalTokens: 125,
+  };
+}
+
+
+function createLogWriter() {
+  return vi.fn<
+    (entry: StructuredChatLog) => void
+  >();
+}
 
 
 describe(
@@ -23,26 +48,34 @@ describe(
 
 
     it(
-      "returns a chat response",
+      "returns a chat response and records structured observability data",
       async () => {
         const chatService = {
           sendMessage:
             vi.fn()
               .mockResolvedValue({
-                sessionId:
-                  "session-1",
+                result: {
+                  sessionId:
+                    "session-1",
 
-                responseId:
-                  "response-1",
+                  responseId:
+                    "response-1",
 
-                answer:
-                  "The critical threshold is above 3.5%.",
+                  answer:
+                    "The critical threshold is above 3.5%.",
 
-                toolsUsed: [
-                  "search_knowledge_base",
-                ],
+                  toolsUsed: [
+                    "search_knowledge_base",
+                  ],
+                },
+
+                tokenUsage:
+                  createTokenUsage(),
               }),
         };
+
+        const logWriter =
+          createLogWriter();
 
         const app =
           express();
@@ -55,6 +88,8 @@ describe(
           "/api/chat",
           createChatRouter(
             chatService,
+            undefined,
+            logWriter,
           ),
         );
 
@@ -98,8 +133,26 @@ describe(
             response.status,
           ).toBe(200);
 
+          const requestId =
+            response.headers.get(
+              "x-request-id",
+            );
+
           expect(
-            await response.json(),
+            requestId,
+          ).toBeTruthy();
+
+          expect(
+            requestId,
+          ).toMatch(
+            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+          );
+
+          const responseBody =
+            await response.json();
+
+          expect(
+            responseBody,
           ).toEqual({
             sessionId:
               "session-1",
@@ -116,11 +169,88 @@ describe(
           });
 
           expect(
+            responseBody,
+          ).not.toHaveProperty(
+            "tokenUsage",
+          );
+
+          expect(
             chatService.sendMessage,
           ).toHaveBeenCalledWith(
             "What is the critical defect rate threshold?",
             undefined,
           );
+
+          expect(
+            logWriter,
+          ).toHaveBeenCalledTimes(1);
+
+          const logEntry =
+            logWriter.mock.calls[0]?.[0];
+
+          expect(
+            logEntry,
+          ).toBeDefined();
+
+          expect(
+            logEntry,
+          ).toEqual(
+            expect.objectContaining({
+              event:
+                "chat_request_completed",
+
+              requestId,
+
+              method:
+                "POST",
+
+              path:
+                "/api/chat",
+
+              statusCode:
+                200,
+
+              toolsUsed: [
+                "search_knowledge_base",
+              ],
+
+              tokenUsage: {
+                inputTokens:
+                  100,
+
+                outputTokens:
+                  25,
+
+                totalTokens:
+                  125,
+              },
+            }),
+          );
+
+          expect(
+            logEntry?.latencyMs,
+          ).toBeGreaterThanOrEqual(
+            0,
+          );
+
+          expect(
+            Number.isFinite(
+              logEntry?.latencyMs,
+            ),
+          ).toBe(true);
+
+          expect(
+            logEntry?.timestamp,
+          ).toBeTruthy();
+
+          expect(
+            Number.isNaN(
+              Date.parse(
+                logEntry?.timestamp
+                ?? "",
+              ),
+            ),
+          ).toBe(false);
         } finally {
           server.close();
         }
@@ -135,20 +265,28 @@ describe(
           sendMessage:
             vi.fn()
               .mockResolvedValue({
-                sessionId:
-                  "existing-session",
+                result: {
+                  sessionId:
+                    "existing-session",
 
-                responseId:
-                  "response-2",
+                  responseId:
+                    "response-2",
 
-                answer:
-                  "Analysis completed.",
+                  answer:
+                    "Analysis completed.",
 
-                toolsUsed: [
-                  "analyze_manufacturing_data",
-                ],
+                  toolsUsed: [
+                    "analyze_manufacturing_data",
+                  ],
+                },
+
+                tokenUsage:
+                  createTokenUsage(),
               }),
         };
+
+        const logWriter =
+          createLogWriter();
 
         const app =
           express();
@@ -161,6 +299,8 @@ describe(
           "/api/chat",
           createChatRouter(
             chatService,
+            undefined,
+            logWriter,
           ),
         );
 
@@ -208,10 +348,36 @@ describe(
           ).toBe(200);
 
           expect(
+            response.headers.get(
+              "x-request-id",
+            ),
+          ).toBeTruthy();
+
+          expect(
             chatService.sendMessage,
           ).toHaveBeenCalledWith(
             "Which supplier has the highest defect rate?",
             "existing-session",
+          );
+
+          expect(
+            logWriter,
+          ).toHaveBeenCalledTimes(1);
+
+          expect(
+            logWriter.mock.calls[0]?.[0],
+          ).toEqual(
+            expect.objectContaining({
+              statusCode:
+                200,
+
+              toolsUsed: [
+                "analyze_manufacturing_data",
+              ],
+
+              tokenUsage:
+                createTokenUsage(),
+            }),
           );
         } finally {
           server.close();
@@ -221,12 +387,15 @@ describe(
 
 
     it(
-      "rejects a missing message",
+      "rejects a missing message and records the request",
       async () => {
         const chatService = {
           sendMessage:
             vi.fn(),
         };
+
+        const logWriter =
+          createLogWriter();
 
         const app =
           express();
@@ -239,6 +408,8 @@ describe(
           "/api/chat",
           createChatRouter(
             chatService,
+            undefined,
+            logWriter,
           ),
         );
 
@@ -279,6 +450,15 @@ describe(
             response.status,
           ).toBe(400);
 
+          const requestId =
+            response.headers.get(
+              "x-request-id",
+            );
+
+          expect(
+            requestId,
+          ).toBeTruthy();
+
           expect(
             await response.json(),
           ).toEqual({
@@ -289,6 +469,34 @@ describe(
           expect(
             chatService.sendMessage,
           ).not.toHaveBeenCalled();
+
+          expect(
+            logWriter,
+          ).toHaveBeenCalledTimes(1);
+
+          expect(
+            logWriter.mock.calls[0]?.[0],
+          ).toEqual(
+            expect.objectContaining({
+              requestId,
+
+              statusCode:
+                400,
+
+              toolsUsed: [],
+
+              tokenUsage: {
+                inputTokens:
+                  0,
+
+                outputTokens:
+                  0,
+
+                totalTokens:
+                  0,
+              },
+            }),
+          );
         } finally {
           server.close();
         }
@@ -297,12 +505,15 @@ describe(
 
 
     it(
-      "rejects a non-string session id",
+      "rejects a non-string session id and records the request",
       async () => {
         const chatService = {
           sendMessage:
             vi.fn(),
         };
+
+        const logWriter =
+          createLogWriter();
 
         const app =
           express();
@@ -315,6 +526,8 @@ describe(
           "/api/chat",
           createChatRouter(
             chatService,
+            undefined,
+            logWriter,
           ),
         );
 
@@ -361,6 +574,15 @@ describe(
             response.status,
           ).toBe(400);
 
+          const requestId =
+            response.headers.get(
+              "x-request-id",
+            );
+
+          expect(
+            requestId,
+          ).toBeTruthy();
+
           expect(
             await response.json(),
           ).toEqual({
@@ -371,6 +593,214 @@ describe(
           expect(
             chatService.sendMessage,
           ).not.toHaveBeenCalled();
+
+          expect(
+            logWriter,
+          ).toHaveBeenCalledTimes(1);
+
+          expect(
+            logWriter.mock.calls[0]?.[0],
+          ).toEqual(
+            expect.objectContaining({
+              requestId,
+
+              statusCode:
+                400,
+
+              toolsUsed: [],
+
+              tokenUsage: {
+                inputTokens:
+                  0,
+
+                outputTokens:
+                  0,
+
+                totalTokens:
+                  0,
+              },
+            }),
+          );
+        } finally {
+          server.close();
+        }
+      },
+    );
+
+
+    it(
+      "rate limits excessive chat requests and records the limited request",
+      async () => {
+        const chatService = {
+          sendMessage:
+            vi.fn()
+              .mockResolvedValue({
+                result: {
+                  sessionId:
+                    "session-rate-limit",
+
+                  responseId:
+                    "response-rate-limit",
+
+                  answer:
+                    "Request completed.",
+
+                  toolsUsed: [],
+                },
+
+                tokenUsage:
+                  createTokenUsage(),
+              }),
+        };
+
+        const rateLimiter =
+          createChatRateLimiter({
+            windowMs:
+              60_000,
+
+            limit:
+              2,
+          });
+
+        const logWriter =
+          createLogWriter();
+
+        const app =
+          express();
+
+        app.use(
+          express.json(),
+        );
+
+        app.use(
+          "/api/chat",
+          createChatRouter(
+            chatService,
+            rateLimiter,
+            logWriter,
+          ),
+        );
+
+        const server =
+          app.listen(0);
+
+        try {
+          const address =
+            server.address();
+
+          if (
+            !address
+            || typeof address === "string"
+          ) {
+            throw new Error(
+              "Expected server address.",
+            );
+          }
+
+          const url =
+            `http://127.0.0.1:${address.port}/api/chat`;
+
+          const requestOptions = {
+            method:
+              "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+
+            body:
+              JSON.stringify({
+                message:
+                  "Run a manufacturing analysis.",
+              }),
+          };
+
+          const firstResponse =
+            await fetch(
+              url,
+              requestOptions,
+            );
+
+          const secondResponse =
+            await fetch(
+              url,
+              requestOptions,
+            );
+
+          const limitedResponse =
+            await fetch(
+              url,
+              requestOptions,
+            );
+
+          expect(
+            firstResponse.status,
+          ).toBe(200);
+
+          expect(
+            secondResponse.status,
+          ).toBe(200);
+
+          expect(
+            limitedResponse.status,
+          ).toBe(429);
+
+          const limitedRequestId =
+            limitedResponse.headers.get(
+              "x-request-id",
+            );
+
+          expect(
+            limitedRequestId,
+          ).toBeTruthy();
+
+          expect(
+            await limitedResponse.json(),
+          ).toEqual({
+            error:
+              "Too many chat requests. Please try again later.",
+          });
+
+          expect(
+            chatService.sendMessage,
+          ).toHaveBeenCalledTimes(
+            2,
+          );
+
+          expect(
+            logWriter,
+          ).toHaveBeenCalledTimes(
+            3,
+          );
+
+          const limitedLog =
+            logWriter.mock.calls[2]?.[0];
+
+          expect(
+            limitedLog,
+          ).toEqual(
+            expect.objectContaining({
+              requestId:
+                limitedRequestId,
+
+              statusCode:
+                429,
+
+              toolsUsed: [],
+
+              tokenUsage: {
+                inputTokens:
+                  0,
+
+                outputTokens:
+                  0,
+
+                totalTokens:
+                  0,
+              },
+            }),
+          );
         } finally {
           server.close();
         }

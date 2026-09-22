@@ -42,6 +42,70 @@ dotenv.config({
 });
 
 
+function getRequiredEnvironmentVariable(
+  name: string,
+): string {
+  const value =
+    process.env[name]?.trim();
+
+  if (!value) {
+    throw new Error(
+      `${name} environment variable is required.`,
+    );
+  }
+
+  return value;
+}
+
+
+function getPositiveNumber(
+  name: string,
+  defaultValue: string,
+): number {
+  const value =
+    process.env[name]
+    ?? defaultValue;
+
+  const numberValue =
+    Number(value);
+
+  if (
+    !Number.isFinite(numberValue)
+    || numberValue <= 0
+  ) {
+    throw new Error(
+      `Invalid ${name} environment variable: ${value}`,
+    );
+  }
+
+  return numberValue;
+}
+
+
+function getPositiveInteger(
+  name: string,
+  defaultValue: string,
+): number {
+  const value =
+    process.env[name]
+    ?? defaultValue;
+
+  const numberValue =
+    Number(value);
+
+  if (
+    !Number.isInteger(numberValue)
+    || numberValue <= 0
+  ) {
+    throw new Error(
+      `Invalid ${name} environment variable: ${value}`,
+    );
+  }
+
+  return numberValue;
+}
+
+
 function getPort(): number {
   const value =
     process.env.PORT
@@ -106,6 +170,18 @@ function getLlmTimeoutMilliseconds(): number {
 }
 
 
+function getChatRateLimitWindowMilliseconds():
+number {
+  const minutes =
+    getPositiveNumber(
+      "CHAT_RATE_LIMIT_WINDOW_MINUTES",
+      "15",
+    );
+
+  return minutes * 60 * 1000;
+}
+
+
 export const env = {
   nodeEnv:
     process.env.NODE_ENV
@@ -127,8 +203,9 @@ export const env = {
     ?? "maranello_ai_knowledge_base",
 
   openAiApiKey:
-    process.env.OPENAI_API_KEY
-    ?? "",
+    getRequiredEnvironmentVariable(
+      "OPENAI_API_KEY",
+    ),
 
   openAiEmbeddingModel:
     process.env.OPENAI_EMBEDDING_MODEL
@@ -143,4 +220,13 @@ export const env = {
 
   llmTimeoutMilliseconds:
     getLlmTimeoutMilliseconds(),
+
+  chatRateLimitWindowMilliseconds:
+    getChatRateLimitWindowMilliseconds(),
+
+  chatRateLimitMaxRequests:
+    getPositiveInteger(
+      "CHAT_RATE_LIMIT_MAX_REQUESTS",
+      "30",
+    ),
 } as const;

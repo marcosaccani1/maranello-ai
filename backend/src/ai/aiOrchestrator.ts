@@ -84,6 +84,9 @@ source document and section naturally in the answer.
 `.trim();
 
 
+export const MAX_TOOL_ROUNDS = 5;
+
+
 interface ResponsesProvider {
   create(
     params: OpenAI.Responses.ResponseCreateParamsNonStreaming,
@@ -104,10 +107,18 @@ interface ToolExecutionProvider {
 }
 
 
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
+
 export interface OrchestrationResult {
   responseId: string;
   answer: string;
   toolsUsed: string[];
+  tokenUsage: TokenUsage;
   chartUrl?: string;
 }
 
@@ -196,6 +207,28 @@ function extractChartUrl(
 }
 
 
+function addResponseUsage(
+  tokenUsage: TokenUsage,
+  response: OpenAI.Responses.Response,
+): void {
+  const usage =
+    response.usage;
+
+  if (!usage) {
+    return;
+  }
+
+  tokenUsage.inputTokens +=
+    usage.input_tokens;
+
+  tokenUsage.outputTokens +=
+    usage.output_tokens;
+
+  tokenUsage.totalTokens +=
+    usage.total_tokens;
+}
+
+
 export class AIOrchestrator {
   constructor(
     private readonly openAI:
@@ -233,6 +266,12 @@ export class AIOrchestrator {
       );
     }
 
+    const tokenUsage: TokenUsage = {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+    };
+
     let response =
       await this.openAI.responses.create({
         model:
@@ -252,10 +291,17 @@ export class AIOrchestrator {
         ],
       });
 
+    addResponseUsage(
+      tokenUsage,
+      response,
+    );
+
     const toolsUsed: string[] = [];
 
     let chartUrl:
       string | null = null;
+
+    let toolRounds = 0;
 
     while (true) {
       if (
@@ -301,6 +347,8 @@ export class AIOrchestrator {
 
           toolsUsed,
 
+          tokenUsage,
+
           ...(chartUrl
             ? {
                 chartUrl,
@@ -308,6 +356,16 @@ export class AIOrchestrator {
             : {}),
         };
       }
+
+      if (
+        toolRounds >= MAX_TOOL_ROUNDS
+      ) {
+        throw new Error(
+          `Maximum tool-calling rounds exceeded (${MAX_TOOL_ROUNDS}).`,
+        );
+      }
+
+      toolRounds += 1;
 
       const toolOutputs =
         await Promise.all(
@@ -372,6 +430,11 @@ export class AIOrchestrator {
             ...TOOL_DEFINITIONS,
           ],
         });
+
+      addResponseUsage(
+        tokenUsage,
+        response,
+      );
     }
   }
 }
