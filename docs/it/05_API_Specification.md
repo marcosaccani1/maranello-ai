@@ -1424,6 +1424,7 @@ I principali codici utilizzati dall'implementazione sono:
 |------|-------------|----------|
 | `200 OK` | Richiesta completata correttamente. | Chat, health check e analisi completate. |
 | `400 Bad Request` | Input non valido. | Messaggio assente o vuoto e altre violazioni del contratto della richiesta. |
+| `429 Too Many Requests` | Limite di richieste alla Chat API superato. | Protezione dell'endpoint `/api/chat` tramite rate limiting. |
 | `500 Internal Server Error` | Errore applicativo inatteso. | Errore non classificato del backend. |
 | `503 Service Unavailable` | Dipendenza necessaria temporaneamente non disponibile. | Data Agent, Knowledge Base o altra dipendenza critica non raggiungibile. |
 
@@ -1431,7 +1432,48 @@ Altri codici possono essere restituiti automaticamente dai framework quando appl
 
 ---
 
-## 7.10 Frontend error handling
+## 7.10 Resilienza delle dipendenze HTTP
+
+Le comunicazioni HTTP del backend verso il Python Data Agent utilizzano un meccanismo condiviso di resilienza.
+
+Le richieste dispongono di:
+
+- timeout esplicito tramite `AbortController`;
+- retry per errori di rete transitori;
+- retry per risposte HTTP `5xx`;
+- assenza di retry automatico per risposte HTTP `4xx`;
+- backoff controllato tra i tentativi.
+
+Lo stesso comportamento viene utilizzato sia dal client analitico sia dal Chart Client.
+
+Il flusso può essere rappresentato come:
+
+    Backend Request
+          |
+          v
+    HTTP Attempt
+          |
+          +---- Success --------> Response
+          |
+          +---- Network / 5xx
+          |          |
+          |          v
+          |       Backoff
+          |          |
+          |          v
+          |        Retry
+          |
+          +---- 4xx ------------> No automatic retry
+          |
+          +---- Timeout --------> AbortController
+
+Il retry non nasconde un'indisponibilità persistente. Quando i tentativi previsti non consentono di completare l'operazione, l'errore viene propagato al normale meccanismo di gestione controllata del backend.
+
+Questa strategia riduce l'impatto di failure temporanei senza trasformare errori applicativi permanenti in retry inutili.
+
+---
+
+## 7.11 Frontend error handling
 
 Quando la Chat API restituisce un errore, il frontend:
 
@@ -1680,23 +1722,46 @@ Questa separazione facilita:
 
 ## 9.5 Configurazione
 
-La configurazione del backend utilizza variabili d'ambiente.
+Il backend Node.js utilizza configurazione tramite environment variables.
 
-Tra le principali:
+Le principali variabili supportate sono:
 
-```text
-OPENAI_API_KEY
-OPENAI_EMBEDDING_MODEL
-LLM_MODEL
-LLM_TEMPERATURE
-LLM_TIMEOUT_SECONDS
-PORT
-DATA_AGENT_URL
-CHROMA_URL
-CHROMA_COLLECTION
-```
+| Variabile | Default | Obbligatoria | Descrizione |
+|-----------|---------|--------------|-------------|
+| `NODE_ENV` | `development` | No | Ambiente applicativo. |
+| `PORT` | `3000` | No | Porta HTTP del backend. |
+| `DATA_AGENT_URL` | `http://127.0.0.1:8001` | No | Base URL del Python Data Agent. |
+| `CHROMA_URL` | `http://127.0.0.1:8000` | No | URL del servizio ChromaDB. |
+| `CHROMA_COLLECTION` | `maranello_ai_knowledge_base` | No | Collection utilizzata dal modulo RAG. |
+| `OPENAI_API_KEY` | Nessuno | **Sì** | Credenziale utilizzata per accedere al provider OpenAI. |
+| `OPENAI_EMBEDDING_MODEL` | `text-embedding-3-small` | No | Modello utilizzato per gli embedding. |
+| `LLM_MODEL` | `gpt-5-mini` | No | Modello utilizzato dall'AI Orchestrator. |
+| `LLM_TEMPERATURE` | `0.0` | No | Temperatura configurata per il modello. |
+| `LLM_TIMEOUT_SECONDS` | `30` | No | Timeout applicativo configurato per le operazioni LLM. |
+| `CHAT_RATE_LIMIT_WINDOW_MINUTES` | `15` | No | Durata della finestra del rate limiter della Chat API. |
+| `CHAT_RATE_LIMIT_MAX_REQUESTS` | `30` | No | Numero massimo di richieste consentite nella finestra configurata. |
 
-Le API key e gli URL delle dipendenze non vengono hardcoded nel codice sorgente.
+`OPENAI_API_KEY` è l'unica variabile della tabella priva di un valore applicativo di fallback.
+
+Durante l'inizializzazione il backend verifica che la chiave:
+
+- sia presente;
+- non sia una stringa vuota;
+- non contenga esclusivamente whitespace.
+
+Se il requisito non è soddisfatto, la configurazione fallisce immediatamente invece di consentire l'avvio di un backend incapace di utilizzare le funzionalità AI.
+
+Il comportamento è intenzionale e segue un principio di **fail-fast configuration validation**.
+
+Le variabili di rate limiting consentono invece di modificare la protezione di:
+
+    POST /api/chat
+
+senza modificare il codice applicativo.
+
+La configurazione reale viene mantenuta fuori dal repository tramite `.env`.
+
+I file `.env.example` documentano le variabili supportate senza contenere credenziali reali.
 
 ---
 
@@ -1881,23 +1946,65 @@ Questo tool viene utilizzato quando la richiesta richiede informazioni presenti 
 
 Esempi:
 
-```text
-What is the critical defect rate threshold?
-```
+    What is the critical defect rate threshold?
 
 oppure:
 
-```text
-Secondo la Supplier Quality Procedure, cosa succede sopra il 4%?
-```
+    Secondo la Supplier Quality Procedure, cosa succede sopra il 4%?
 
-Il backend esegue il retrieval tramite il modulo RAG e restituisce il risultato a OpenAI come:
+Il backend esegue il retrieval tramite il modulo RAG.
 
-```text
-function_call_output
-```
+ChromaDB restituisce un insieme di candidati semanticamente vicini alla query. Prima che questi risultati vengano utilizzati come contesto documentale, il `RetrieverService` applica un filtro di rilevanza basato sulla distanza restituita dal vector database.
 
-Il modello utilizza quindi il contesto recuperato per generare la risposta finale.
+La configurazione corrente utilizza:
+
+    maxDistance = 0.70
+
+I candidati con distanza superiore a `0.70` vengono esclusi.
+
+Vengono inoltre esclusi risultati per i quali la distanza sia assente o non valida.
+
+Il flusso può essere rappresentato come:
+
+    User Query
+        |
+        v
+    Query Embedding
+        |
+        v
+    ChromaDB Top-K Candidates
+        |
+        v
+    Distance Filtering
+        |
+        | maxDistance <= 0.70
+        v
+    Relevant Chunks
+        |
+        v
+    function_call_output
+        |
+        v
+    OpenAI Response
+
+Il retrieval può quindi restituire anche **zero chunk** quando nessun candidato supera il criterio minimo di rilevanza.
+
+Questo comportamento è intenzionale: il sistema evita di utilizzare automaticamente il nearest neighbor disponibile quando la sua similarità semantica non è sufficientemente forte da costituire un grounding affidabile.
+
+La soglia `0.70` è stata calibrata empiricamente sul corpus documentale e sull'embedding model utilizzati da Maranello AI attraverso query:
+
+- pertinenti in inglese;
+- pertinenti in italiano;
+- borderline;
+- chiaramente estranee al dominio della Knowledge Base.
+
+La soglia non viene considerata un valore universale. Un cambiamento significativo del corpus, della strategia di chunking o dell'embedding model richiederebbe una nuova calibrazione.
+
+I chunk accettati vengono restituiti a OpenAI come:
+
+    function_call_output
+
+Il modello utilizza quindi esclusivamente il contesto documentale considerato sufficientemente pertinente per generare la risposta finale.
 
 ---
 
@@ -1958,51 +2065,139 @@ L'orchestrazione non è limitata necessariamente a una singola tool call.
 
 Il flusso logico è:
 
-```text
-User Message
-    |
-    v
-OpenAI Response
-    |
-    +---- Final Answer
-    |
-    +---- Function Call
-              |
-              v
-        Tool Execution
-              |
-              v
-    function_call_output
-              |
-              v
-        OpenAI Response
-```
+    User Message
+        |
+        v
+    OpenAI Response
+        |
+        +---- Final Answer
+        |
+        +---- Function Call
+                  |
+                  v
+             Tool Execution
+                  |
+                  v
+         function_call_output
+                  |
+                  v
+             OpenAI Response
 
 Il ciclo prosegue fino a quando:
 
 - il modello restituisce una risposta finale;
-- oppure viene raggiunto il limite massimo di round previsto dal backend.
+- si verifica un errore che interrompe l'elaborazione;
+- viene raggiunto il limite massimo di tool round previsto dal backend.
 
-Questo protegge il sistema da loop di tool calling non terminanti.
+L'implementazione definisce:
+
+    MAX_TOOL_ROUNDS = 5
+
+Un **tool round** rappresenta un ciclo nel quale il modello richiede l'esecuzione di uno o più tool e il backend restituisce i relativi `function_call_output`.
+
+Il backend consente quindi l'esecuzione di un massimo di cinque tool round per singola richiesta conversazionale.
+
+Se, dopo il quinto round, il modello richiede un ulteriore ciclo di tool calling, l'orchestrazione viene interrotta con un errore controllato invece di proseguire indefinitamente.
+
+Il limite costituisce un application boundary intenzionale che protegge il sistema da:
+
+- loop agentici non terminanti;
+- consumo incontrollato di chiamate verso il provider AI;
+- esecuzioni ripetute dei servizi interni;
+- crescita non controllata della latenza della richiesta.
+
+La decisione non modifica il principio di **LLM-driven routing**: il modello continua a decidere autonomamente quali tool utilizzare e quando utilizzarli, ma opera entro un limite esplicito definito dall'applicazione.
 
 ---
 
 ## 10.12 Chat Response
 
-La risposta restituita al frontend utilizza il seguente contratto:
+Quando l'orchestrazione termina correttamente, la Chat API restituisce una response JSON con il seguente contratto pubblico:
 
-```json
-{
-  "sessionId": "session-id",
-  "answer": "Generated answer",
-  "toolsUsed": [
-    "analyze_manufacturing_data"
-  ],
-  "chartUrl": "/api/charts/generated-chart.png"
-}
-```
+    {
+      "sessionId": "string",
+      "answer": "string",
+      "toolsUsed": [
+        "string"
+      ],
+      "chartUrl": "string | null"
+    }
 
-Il campo `chartUrl` viene incluso esclusivamente quando una delle analisi ha prodotto un grafico.
+### Campi
+
+| Campo | Tipo | Descrizione |
+|-------|------|-------------|
+| `sessionId` | `string` | Identificativo della conversazione corrente. |
+| `answer` | `string` | Risposta finale generata dall'AI Orchestrator. |
+| `toolsUsed` | `string[]` | Tool applicativi effettivamente utilizzati durante l'orchestrazione. |
+| `chartUrl` | `string \| null` | URL backend del grafico quando l'analisi ne produce uno; altrimenti `null`. |
+
+Il contratto pubblico rimane intenzionalmente separato dai metadati interni di osservabilità.
+
+In particolare, il backend raccoglie internamente informazioni come:
+
+    requestId
+    tokenUsage
+    latency
+    statusCode
+
+ma questi valori non vengono aggiunti automaticamente al body JSON della Chat Response.
+
+Il `requestId` viene invece esposto attraverso l'header HTTP:
+
+    X-Request-Id
+
+Esempio concettuale:
+
+    HTTP/1.1 200 OK
+    X-Request-Id: <request-id>
+    Content-Type: application/json
+
+    {
+      "sessionId": "<session-id>",
+      "answer": "...",
+      "toolsUsed": [
+        "search_knowledge_base"
+      ],
+      "chartUrl": null
+    }
+
+La distinzione tra `sessionId` e `requestId` è intenzionale:
+
+- `sessionId` identifica la conversazione e può essere riutilizzato tra più richieste;
+- `requestId` identifica una singola richiesta HTTP ed è utilizzato per osservabilità e troubleshooting.
+
+Il token usage non fa parte del contratto pubblico:
+
+    tokenUsage
+
+rimane un metadato interno dell'orchestrazione e viene utilizzato dal livello di osservabilità del backend.
+
+Questa separazione evita di accoppiare il frontend a informazioni operative e consente di evolvere logging, metriche e monitoraggio senza modificare inutilmente il contratto della Chat API.
+
+### Esempio con Data Agent e grafico
+
+    {
+      "sessionId": "<session-id>",
+      "answer": "The monthly defect rate...",
+      "toolsUsed": [
+        "analyze_manufacturing_data"
+      ],
+      "chartUrl": "/api/charts/monthly_defect_rate_<unique-id>.png"
+    }
+
+### Esempio con RAG
+
+    {
+      "sessionId": "<session-id>",
+      "answer": "According to the Manufacturing Quality Policy...",
+      "toolsUsed": [
+        "search_knowledge_base"
+      ],
+      "chartUrl": null
+    }
+
+La presenza di `toolsUsed` permette al frontend e ai test di conoscere il percorso applicativo seguito senza esporre i dettagli interni delle function call del provider AI.
 
 ---
 
@@ -2276,36 +2471,115 @@ Il frontend visualizza quindi direttamente l'immagine all'interno del messaggio 
 
 ---
 
-## 11.7 Grafico non disponibile
+## 11.7 Grafico non disponibile e resilienza del Chart Client
 
-Se il file richiesto non è disponibile o il Data Agent non è raggiungibile, il backend deve evitare di esporre dettagli del filesystem o del servizio interno.
+Quando il frontend richiede un grafico, il backend non accede direttamente al filesystem del Python Data Agent.
 
-L'errore viene restituito attraverso il normale meccanismo di gestione controllata del backend.
+Il `ChartClient` effettua una richiesta HTTP verso il servizio Python utilizzando lo stesso meccanismo condiviso di resilienza adottato dal `DataAgentClient`.
+
+La richiesta dispone di:
+
+- timeout esplicito tramite `AbortController`;
+- retry per errori di rete transitori;
+- retry per risposte HTTP `5xx`;
+- backoff controllato tra i tentativi;
+- nessun retry automatico per risposte HTTP `4xx`.
+
+Il flusso può essere rappresentato come:
+
+    Frontend
+       |
+       v
+    GET /api/charts/:filename
+       |
+       v
+    Backend Chart Proxy
+       |
+       v
+    Filename Validation
+       |
+       v
+    ChartClient
+       |
+       v
+    HTTP Attempt
+       |
+       +---- Success ---------> Stream PNG
+       |
+       +---- Network / 5xx
+       |          |
+       |          v
+       |       Backoff
+       |          |
+       |          v
+       |        Retry
+       |
+       +---- 4xx -------------> No automatic retry
+       |
+       +---- Timeout ---------> AbortController
+
+Se il grafico rimane non disponibile dopo la gestione prevista dal client, il backend propaga l'errore attraverso il normale meccanismo di gestione controllata.
+
+Il retry è limitato alle condizioni considerate potenzialmente transitorie e non viene utilizzato per trasformare errori client permanenti in tentativi ripetuti.
+
+La validazione del filename rimane precedente all'accesso al servizio Python, preservando la protezione contro path traversal e riferimenti non validi.
 
 ---
 
-## 11.8 Runtime artifacts
+## 11.8 Runtime artifacts e retention
 
-I file PNG sono artefatti runtime.
+I grafici PNG sono artefatti runtime.
 
-Non fanno parte del repository sorgente e non vengono versionati.
+Non fanno parte del codice sorgente e non vengono versionati nel repository.
 
-Il flusso è:
+Il Data Agent genera filename univoci per evitare collisioni tra richieste differenti.
 
-```text
-Data Analysis
-     |
-     v
-Matplotlib
-     |
-     v
-Generated PNG
-     |
-     v
-Runtime Chart Directory
-```
+Il lifecycle dei grafici è gestito dal Python Data Agent attraverso `ChartCleanupService`.
 
-La generazione dei grafici è server-side e utilizza Matplotlib in modalità non interattiva. 
+La configurazione predefinita utilizza:
+
+    chart_retention_hours = 24.0
+    chart_cleanup_interval_minutes = 60.0
+
+Il cleanup viene eseguito:
+
+1. durante l'avvio del Data Agent;
+2. periodicamente durante il lifecycle dell'applicazione;
+3. con cancellazione controllata del background task durante lo shutdown.
+
+Il servizio elimina esclusivamente i file runtime che rispettano il pattern gestito:
+
+    monthly_defect_rate_*.png
+
+e che hanno superato il periodo di retention configurato.
+
+Il Chart Proxy non è responsabile della cancellazione dei file.
+
+La separazione delle responsabilità è quindi:
+
+    Python Data Agent
+        |
+        +---- Generate PNG
+        |
+        +---- Store Runtime Artifact
+        |
+        +---- Apply Retention Policy
+        |
+        v
+    Backend Chart Proxy
+        |
+        +---- Validate Filename
+        |
+        +---- Retrieve Chart Resiliently
+        |
+        v
+    React Frontend
+
+Questa separazione mantiene il backend Node.js indipendente dal filesystem del Data Agent e impedisce contemporaneamente l'accumulo indefinito dei grafici generati.
+
+In un deployment distribuito, lo storage locale potrebbe essere sostituito da object storage o blob storage senza modificare il contratto pubblico:
+
+    GET /api/charts/:filename
 
 ---
 
@@ -2659,34 +2933,88 @@ Mostrami l'andamento mensile del defect rate.
 
 ---
 
-## 12.13 Generazione del grafico
+## 12.13 Generazione e retention dei grafici
 
 Quando l'analisi supporta una rappresentazione grafica, il Data Agent può generare un'immagine PNG.
 
 Il processo è:
 
-```text
-Analytical Result
-      |
-      v
-Matplotlib
-      |
-      v
-PNG Generation
-      |
-      v
-Unique Filename
-      |
-      v
-Runtime Chart Directory
-      |
-      v
-Chart Reference
-```
+    Analytical Result
+          |
+          v
+    Matplotlib
+          |
+          v
+    PNG Generation
+          |
+          v
+    Unique Filename
+          |
+          v
+    Runtime Chart Directory
+          |
+          v
+    Chart Reference
 
 Matplotlib viene utilizzato in modalità non interattiva.
 
 I file generati sono artefatti runtime e non vengono versionati nel repository.
+
+Per evitare una crescita indefinita della directory dei grafici, il Data Agent implementa una policy automatica di retention tramite `ChartCleanupService`.
+
+La configurazione predefinita utilizza:
+
+    chart_retention_hours = 24.0
+    chart_cleanup_interval_minutes = 60.0
+
+Di conseguenza, i grafici runtime appartenenti al pattern gestito dal servizio possono essere eliminati quando superano le 24 ore di età.
+
+Il cleanup viene eseguito:
+
+1. una prima volta durante l'avvio del Data Agent;
+2. successivamente attraverso un task periodico eseguito durante il lifecycle dell'applicazione;
+3. con intervallo predefinito di 60 minuti.
+
+Il task periodico viene cancellato in modo controllato durante lo shutdown del servizio.
+
+Le operazioni di scansione e rimozione dei file vengono eseguite senza bloccare il normale event loop dell'applicazione FastAPI.
+
+Il cleanup è intenzionalmente limitato ai grafici generati dal Data Agent che rispettano il pattern:
+
+    monthly_defect_rate_*.png
+
+Il servizio non effettua quindi una cancellazione indiscriminata dei file presenti nella directory runtime.
+
+Sono inoltre gestite condizioni quali:
+
+- directory dei grafici non ancora esistente;
+- file già rimosso durante il cleanup;
+- configurazioni di retention o intervallo non valide.
+
+Il lifecycle complessivo è:
+
+    Data Agent Startup
+          |
+          v
+    Immediate Cleanup
+          |
+          v
+    Application Running
+          |
+          +---- Generate Runtime Charts
+          |
+          +---- Periodic Cleanup
+          |         |
+          |         v
+          |    Remove Expired Charts
+          |
+          v
+    Controlled Shutdown
+          |
+          v
+    Cancel Cleanup Task
+
+Questa strategia mantiene semplice la generazione server-side dei grafici e impedisce contemporaneamente l'accumulo indefinito degli artefatti runtime.
 
 ---
 
@@ -2740,11 +3068,19 @@ Python Data Agent
 
 ---
 
-## 12.16 Data Cleaning
+## 12.16 Data Cleaning e DatasetRepository
 
-Prima delle analisi, il dataset viene sottoposto a una pipeline di cleaning.
+Il Manufacturing Dataset viene gestito attraverso un componente dedicato denominato `DatasetRepository`.
 
-Tra le operazioni previste:
+Il repository incapsula:
+
+- caricamento del CSV;
+- data cleaning;
+- preparazione del DataFrame;
+- caching del dataset preparato;
+- reload esplicito della sorgente.
+
+La pipeline di cleaning comprende:
 
 - rimozione dei duplicati esatti;
 - normalizzazione dei valori testuali;
@@ -2759,20 +3095,93 @@ Tra le operazioni previste:
 
 La pulizia viene applicata in modo deterministico e riproducibile.
 
+Il dataset preparato non viene tuttavia ricostruito a ogni richiesta `POST /api/analysis`.
+
+Il caricamento utilizza una strategia **lazy per processo**:
+
+    First Analysis Request
+            |
+            v
+    DatasetRepository.get()
+            |
+            v
+    Cache available?
+       /         \
+     No           Yes
+     |             |
+     v             |
+    Load CSV       |
+     |             |
+     v             |
+    Clean Data     |
+     |             |
+     v             |
+    Cache Prepared DataFrame
+       \          /
+        \        /
+         v      v
+       Analysis
+
+Alla prima analisi il repository:
+
+1. legge il Manufacturing Dataset;
+2. esegue la pipeline di cleaning;
+3. memorizza il DataFrame preparato in memoria.
+
+Le richieste successive riutilizzano il dataset preparato senza ripetere `pd.read_csv` e l'intera pipeline di cleaning.
+
+Questo elimina il costo di I/O e preparazione precedentemente associato a ogni richiesta analitica.
+
+Il repository espone inoltre un'operazione esplicita di `reload()` per ricostruire la cache quando necessario.
+
+Il reload viene gestito in modo transazionale: se il nuovo caricamento o cleaning fallisce, il dataset precedentemente disponibile rimane utilizzabile invece di sostituire la cache con uno stato non valido.
+
+Il repository protegge inoltre il DataFrame memorizzato da modifiche accidentali da parte delle analisi consumer.
+
 ---
 
-## 12.17 Dataset read-only
+## 12.17 Dataset read-only e lifecycle
 
 Il Manufacturing Dataset viene utilizzato come sorgente analitica in sola lettura.
 
 Il Data Agent:
 
-- carica i dati;
-- li normalizza in memoria;
-- calcola risultati;
-- non modifica il file CSV sorgente.
+- legge il CSV sorgente quando il `DatasetRepository` deve inizializzare o ricaricare la cache;
+- normalizza i dati in memoria;
+- conserva il dataset preparato per le analisi successive;
+- calcola risultati senza modificare il file CSV sorgente.
 
-Le richieste analitiche sono quindi prive di effetti persistenti sul dataset.
+Le normali richieste analitiche sono quindi prive di effetti persistenti sul dataset.
+
+Il lifecycle può essere sintetizzato come:
+
+    Source CSV
+        |
+        v
+    Load + Clean
+        |
+        v
+    Prepared In-Memory Dataset
+        |
+        +---- Analysis Request 1
+        |
+        +---- Analysis Request 2
+        |
+        +---- Analysis Request N
+        |
+        +---- Explicit reload()
+                    |
+                    v
+               Load + Clean
+                    |
+                    v
+             Refreshed Cache
+
+La cache è locale al processo del Python Data Agent e non costituisce una persistenza distribuita.
+
+Per il dataset corrente, composto da circa 2.000 record, questo approccio mantiene Pandas semplice ed efficace eliminando al tempo stesso il caricamento ripetuto per richiesta.
+
+Per volumi significativamente maggiori, il livello di accesso ai dati potrebbe essere sostituito da un motore query-oriented senza modificare il contratto HTTP del Data Agent.
 
 ---
 
@@ -3352,41 +3761,116 @@ Gli errori tecnici vengono tradotti in messaggi controllati prima di essere rest
 
 ---
 
-## 13.11 Configurazione tramite ambiente
+## 13.11 Configurazione tramite ambiente e fail-fast
 
-La configurazione sensibile o dipendente dall'ambiente viene mantenuta fuori dal codice.
+La configurazione sensibile o dipendente dall'ambiente viene mantenuta fuori dal codice sorgente.
 
-Tra le variabili principali:
+Tra le principali variabili del backend:
 
-```text
-OPENAI_API_KEY
-OPENAI_EMBEDDING_MODEL
-LLM_MODEL
-LLM_TEMPERATURE
-LLM_TIMEOUT_SECONDS
-PORT
-DATA_AGENT_URL
-CHROMA_URL
-CHROMA_COLLECTION
-```
+    OPENAI_API_KEY
+    OPENAI_EMBEDDING_MODEL
+    LLM_MODEL
+    LLM_TEMPERATURE
+    LLM_TIMEOUT_SECONDS
+    PORT
+    DATA_AGENT_URL
+    CHROMA_URL
+    CHROMA_COLLECTION
+    CHAT_RATE_LIMIT_WINDOW_MINUTES
+    CHAT_RATE_LIMIT_MAX_REQUESTS
 
-Questo permette di eseguire lo stesso codice in ambienti differenti modificando esclusivamente la configurazione.
+`OPENAI_API_KEY` costituisce una configurazione obbligatoria.
+
+Il backend applica una strategia **fail-fast**: se la variabile è assente, vuota oppure contiene esclusivamente whitespace, la configurazione viene considerata non valida e il servizio non procede con un normale avvio applicativo.
+
+Il comportamento desiderato è:
+
+    Backend Startup
+          |
+          v
+    Read Environment
+          |
+          v
+    OPENAI_API_KEY valid?
+       /          \
+     Yes           No
+      |             |
+      v             v
+    Continue     Fail Fast
+
+Questa scelta evita di avviare un'istanza apparentemente funzionante che fallirebbe soltanto alla prima richiesta che necessita del provider AI.
+
+Le configurazioni non sensibili possono utilizzare valori di default quando previsto dall'applicazione.
+
+Le credenziali reali rimangono escluse dal repository tramite `.env`, mentre i file `.env.example` documentano esclusivamente le variabili supportate.
 
 ---
 
-## 13.12 Limitazioni correnti
+## 13.12 Rate limiting della Chat API
+
+L'endpoint:
+
+    POST /api/chat
+
+può generare chiamate verso il provider AI e verso servizi interni. Per questo motivo il backend applica un rate limiter dedicato prima dell'esecuzione della logica conversazionale a pagamento.
+
+La configurazione predefinita utilizza:
+
+    CHAT_RATE_LIMIT_WINDOW_MINUTES = 15
+    CHAT_RATE_LIMIT_MAX_REQUESTS = 30
+
+Il limite predefinito è quindi di **30 richieste per finestra di 15 minuti**, secondo la chiave utilizzata dal middleware di rate limiting.
+
+Quando il limite viene superato, il backend restituisce:
+
+    429 Too Many Requests
+
+con una risposta controllata equivalente a:
+
+    Too many chat requests. Please try again later.
+
+Il rate limiter viene applicato prima del `ChatService`, impedendo che una richiesta già limitata raggiunga l'AI Orchestrator e generi una chiamata non necessaria al provider.
+
+Il middleware utilizza gli header standard del rate limiting e non utilizza i legacy headers.
+
+I valori della finestra e del numero massimo di richieste sono configurabili tramite environment variables.
+
+Il rate limiting rappresenta una protezione applicativa di base contro abuso accidentale o consumo eccessivo della Chat API, ma non sostituisce:
+
+- autenticazione;
+- autorizzazione;
+- quote persistenti per identità;
+- controllo dei costi per utente;
+- policy enterprise di API management.
+
+---
+
+## 13.13 Limitazioni di sicurezza correnti
 
 La versione corrente non implementa ancora meccanismi enterprise come:
 
 - autenticazione degli utenti;
 - autorizzazione per ruolo;
+- OAuth 2.0 / OpenID Connect;
 - API key service-to-service;
-- rate limiting;
+- quote persistenti associate a un'identità autenticata;
 - Web Application Firewall;
 - distributed identity;
-- secret manager esterno.
+- secret manager esterno;
+- API gateway enterprise.
 
-Tali funzionalità non vengono considerate implementate e costituiscono possibili evoluzioni future.
+Queste funzionalità non vengono considerate implementate e costituiscono possibili evoluzioni future.
+
+La baseline corrente comprende invece:
+
+- configurazione sensibile tramite environment variables;
+- fail-fast sulla configurazione OpenAI obbligatoria;
+- isolamento delle dipendenze interne dal frontend;
+- validazione degli input;
+- protezione del Chart Proxy;
+- Data Agent deterministico senza arbitrary code execution;
+- rate limiting della Chat API;
+- gestione controllata degli errori.
 
 ---
 
@@ -3394,706 +3878,920 @@ Tali funzionalità non vengono considerate implementate e costituiscono possibil
 
 ## 14.1 Panoramica
 
-Il progetto implementa logging applicativo sufficiente a supportare sviluppo, troubleshooting e analisi degli errori.
+Il backend implementa un livello di osservabilità strutturata per la Chat API con l'obiettivo di rendere tracciabile il comportamento delle richieste senza modificare il contratto pubblico utilizzato dal frontend.
 
-L'osservabilità della versione corrente è intenzionalmente più semplice rispetto a una piattaforma enterprise distribuita.
+Per ogni richiesta conversazionale vengono raccolte informazioni utili a comprendere:
 
-Non vengono quindi dichiarati come implementati sistemi non presenti nel progetto, come:
+- identificativo della richiesta;
+- esito HTTP;
+- latenza;
+- strumenti utilizzati;
+- consumo di token OpenAI.
 
-- distributed tracing;
-- Prometheus;
-- Grafana;
-- centralized log aggregation;
-- enterprise alert management.
-
----
-
-## 14.2 Logging del backend
-
-Il backend Node.js registra gli eventi applicativi rilevanti necessari a comprendere il comportamento del sistema.
-
-Tra gli eventi di interesse:
-
-- avvio del servizio;
-- richieste ricevute;
-- errori applicativi;
-- errori delle dipendenze;
-- tool execution failure;
-- problemi di comunicazione con Data Agent o ChromaDB.
-
-Le informazioni sensibili non devono essere incluse nei log.
+Questi dati appartengono all'osservabilità interna del backend e non vengono aggiunti indiscriminatamente alla response pubblica.
 
 ---
 
-## 14.3 Logging del Data Agent
+## 14.2 Request ID
 
-Il Python Data Agent può registrare informazioni relative a:
+Ogni richiesta alla Chat API viene associata a un identificativo di richiesta.
 
-- avvio del servizio;
-- caricamento del dataset;
-- interpretazione della richiesta;
-- esecuzione dell'analisi;
-- generazione dei grafici;
-- errori analitici.
+Il valore consente di correlare la richiesta HTTP con le informazioni registrate dal middleware di osservabilità.
 
-Anche in questo caso il logging non deve includere credenziali o contenuti sensibili non necessari.
+Il backend restituisce inoltre l'identificativo attraverso l'header:
+
+    X-Request-Id
+
+Il flusso è:
+
+    POST /api/chat
+          |
+          v
+    Generate Request ID
+          |
+          v
+    Request Processing
+          |
+          v
+    Structured Observability
+          |
+          +---- requestId
+          |
+          +---- statusCode
+          |
+          +---- latency
+          |
+          +---- toolsUsed
+          |
+          +---- tokenUsage
+          |
+          v
+    HTTP Response
+          |
+          v
+    X-Request-Id
+
+Il request ID è un metadato di osservabilità e non sostituisce il `sessionId`.
+
+I due identificativi hanno responsabilità differenti:
+
+| Identificativo | Responsabilità |
+|----------------|----------------|
+| `sessionId` | Mantiene la continuità della conversazione tra più richieste. |
+| `requestId` | Identifica una singola richiesta HTTP per osservabilità e troubleshooting. |
 
 ---
 
-## 14.4 `toolsUsed` come elemento di osservabilità
+## 14.3 Logging strutturato della Chat API
 
-La Chat API restituisce:
+Il middleware di osservabilità registra informazioni strutturate relative all'elaborazione della richiesta.
 
-```text
-toolsUsed
-```
+Tra i dati disponibili rientrano:
 
-Questo campo fornisce una forma semplice di osservabilità del comportamento agentico.
+- `requestId`;
+- status code HTTP;
+- latenza della richiesta;
+- tool applicativi utilizzati;
+- token usage associato all'orchestrazione AI.
 
-Permette di verificare se una risposta ha utilizzato:
+Questo consente di distinguere, ad esempio, una richiesta che ha utilizzato soltanto il RAG da una richiesta analitica o ibrida.
 
-```text
-search_knowledge_base
-```
+Il logging strutturato facilita:
 
-```text
-analyze_manufacturing_data
-```
+- troubleshooting;
+- analisi delle failure;
+- verifica del routing agentico;
+- analisi della latenza;
+- osservazione del consumo del provider AI.
 
-entrambi oppure nessuno dei due.
+Le informazioni sensibili, come `OPENAI_API_KEY`, non devono essere incluse nei log.
+
+---
+
+## 14.4 Tool observability
+
+Il sistema mantiene l'informazione relativa ai tool effettivamente utilizzati durante l'orchestrazione.
+
+I tool principali sono:
+
+    search_knowledge_base
+    analyze_manufacturing_data
+
+L'informazione viene utilizzata internamente dall'osservabilità e continua inoltre a essere restituita al frontend tramite il campo pubblico:
+
+    toolsUsed
 
 Esempio:
 
-```json
-{
-  "toolsUsed": [
-    "search_knowledge_base",
-    "analyze_manufacturing_data"
-  ]
-}
-```
+    {
+      "toolsUsed": [
+        "search_knowledge_base",
+        "analyze_manufacturing_data"
+      ]
+    }
 
-Questo risulta particolarmente utile durante:
-
-- testing;
-- debugging;
-- validazione del routing;
-- demo del progetto.
+Questo rende possibile osservare il percorso agentico senza richiedere al client di conoscere i dettagli interni delle function call OpenAI.
 
 ---
 
-## 14.5 Health checks
+## 14.5 Token usage
 
-Gli endpoint:
+L'AI Orchestrator raccoglie il token usage restituito dal provider per ogni round della Responses API.
 
-```http
-GET /health
-```
+Il modello interno utilizza tre valori:
 
-del backend e del Data Agent costituiscono il principale meccanismo di verifica della disponibilità dei processi applicativi.
+    inputTokens
+    outputTokens
+    totalTokens
 
-Consentono di distinguere rapidamente tra:
+Il consumo viene **aggregato su tutti i round OpenAI appartenenti alla stessa orchestrazione**.
 
-```text
-process running
-```
+Questo è particolarmente importante per le richieste che utilizzano tool calling.
+
+Ad esempio:
+
+    OpenAI Round 1
+        input:  100
+        output: 20
+
+    Tool Execution
+
+    OpenAI Round 2
+        input:  200
+        output: 30
+
+produce un consumo aggregato:
+
+    inputTokens  = 300
+    outputTokens = 50
+    totalTokens  = 350
+
+Il sistema non considera quindi soltanto la chiamata finale al modello, ma anche i round intermedi necessari all'esecuzione dei tool.
+
+Se il provider non restituisce informazioni di usage per un determinato round, l'orchestratore gestisce l'assenza senza interrompere l'elaborazione.
+
+---
+
+## 14.6 Separazione tra osservabilità interna e API pubblica
+
+Il token usage viene mantenuto come informazione interna.
+
+La response pubblica della Chat API continua a utilizzare il contratto:
+
+    {
+      "sessionId": "...",
+      "answer": "...",
+      "toolsUsed": [],
+      "chartUrl": "..."
+    }
+
+e non viene estesa con:
+
+    tokenUsage
+
+Questa separazione evita di accoppiare il frontend a metadati operativi che appartengono al backend.
+
+Il flusso logico è:
+
+    AI Orchestrator
+          |
+          +---- Public Chat Result --------> Frontend
+          |
+          +---- Observability Metadata ----> Backend Logging
+
+La stessa elaborazione produce quindi sia il risultato applicativo destinato al client sia i metadati necessari all'osservabilità, mantenendo separati i due contratti.
+
+---
+
+## 14.7 Status code e latenza
+
+Il middleware registra l'esito HTTP e la latenza della richiesta.
+
+Questo permette di distinguere richieste:
+
+- completate correttamente;
+- rifiutate dalla validazione;
+- limitate dal rate limiter;
+- fallite durante l'elaborazione.
+
+L'osservabilità non è limitata esclusivamente alle richieste `200 OK`.
+
+Anche condizioni come:
+
+    400 Bad Request
 
 e:
 
-```text
-process unavailable
-```
+    429 Too Many Requests
 
-La disponibilità di una specifica dipendenza viene invece verificata nel momento in cui tale dipendenza è necessaria.
+vengono tracciate con le informazioni applicabili alla richiesta.
+
+Quando una richiesta viene interrotta prima dell'esecuzione dell'AI Orchestrator, i metadati relativi a tool e token possono naturalmente non essere disponibili.
 
 ---
 
-## 14.6 Dependency-aware errors
+## 14.8 Health checks e dependency-aware errors
 
-L'implementazione distingue alcuni errori infrastrutturali in base alla dipendenza coinvolta.
+Gli endpoint:
+
+    GET /health
+
+del backend e del Data Agent permettono di verificare la disponibilità dei rispettivi processi.
+
+Il backend distingue inoltre le indisponibilità delle dipendenze necessarie alla richiesta.
 
 ### Data Agent
 
-```text
-Manufacturing data analysis is temporarily unavailable. Please try again later.
-```
+    Manufacturing data analysis is temporarily unavailable. Please try again later.
 
 ### Knowledge Base
 
-```text
-The company knowledge base is temporarily unavailable. Please try again later.
-```
+    The company knowledge base is temporarily unavailable. Please try again later.
 
-Entrambi vengono rappresentati attraverso:
+Queste condizioni vengono rappresentate attraverso:
 
-```text
-503 Service Unavailable
-```
+    503 Service Unavailable
 
-Questa distinzione migliora il troubleshooting rispetto a un generico errore interno.
+La combinazione tra status code, request ID e logging strutturato migliora il troubleshooting rispetto a un errore interno generico.
 
 ---
 
-## 14.7 Osservabilità futura
+## 14.9 Limiti dell'osservabilità corrente
 
-In una futura evoluzione enterprise potrebbero essere introdotti:
+La versione corrente implementa una baseline concreta di osservabilità applicativa, ma non costituisce una piattaforma enterprise completa.
 
-- structured logging centralizzato;
-- correlation ID;
-- metriche applicative;
-- latency metrics;
-- error rate;
-- tool usage metrics;
-- token usage;
+Sono implementati:
+
+- request ID;
+- header `X-Request-Id`;
+- logging strutturato della Chat API;
+- status code;
+- latenza;
+- tool usage;
+- token usage aggregato sui round OpenAI.
+
+Non sono invece implementati:
+
+- distributed tracing;
+- OpenTelemetry;
+- Prometheus;
+- Grafana;
+- centralized log aggregation;
 - dashboard operative;
-- alerting;
-- distributed tracing.
+- alerting enterprise;
+- persistenza storica centralizzata delle metriche.
 
-Tali funzionalità non fanno parte della versione corrente.
+Questi elementi costituiscono possibili evoluzioni per un deployment distribuito o production-grade.
 
 ---
 
 # 15. Testing delle API
 
-## 15.1 Obiettivo
+## 15.1 Strategia di testing
 
-Le API sono state testate per verificare:
+Maranello AI utilizza una strategia di testing multilivello per verificare separatamente:
 
-- correttezza dei contratti;
-- validazione degli input;
-- gestione delle sessioni;
-- tool routing;
-- integrazione RAG;
-- integrazione Data Agent;
-- richieste ibride;
-- distribuzione dei grafici;
-- gestione delle dipendenze non disponibili.
+- componenti deterministici;
+- servizi applicativi;
+- client HTTP;
+- orchestrazione AI;
+- retrieval RAG;
+- middleware;
+- contratti API;
+- lifecycle del Python Data Agent;
+- integrazione tra i componenti principali.
 
----
-
-## 15.2 Backend automated tests
-
-Il backend dispone di una suite automatizzata basata su Vitest.
-
-La suite finale comprende:
-
-```text
-15 test files
-86 tests
-```
-
-eseguiti con successo.
-
-I controlli backend includono inoltre:
-
-```text
-typecheck
-lint
-test
-build
-```
-
-Tutti questi controlli devono completarsi correttamente prima di considerare stabile la versione finale.
+La suite automatizzata è stata ampliata anche per coprire i miglioramenti introdotti dopo la revisione architetturale del progetto.
 
 ---
 
-## 15.3 Frontend verification
+## 15.2 Baseline automatizzata verificata
 
-Il frontend viene verificato attraverso:
+La baseline corrente verificata comprende:
 
-```text
-lint
-build
-```
+| Componente | Test superati |
+|------------|---------------|
+| Node.js Backend | 120 |
+| Python Data Agent | 80 |
+| **Totale** | **200** |
 
-La build Vite deve completarsi correttamente prima della consegna.
+Per il backend Node.js la suite è distribuita su:
 
-Sono inoltre state effettuate verifiche manuali dell'interfaccia per:
+    18 test files
 
-- invio dei messaggi;
-- stato loading;
-- visualizzazione delle risposte;
-- mantenimento della sessione;
-- rendering dei grafici;
-- gestione degli errori;
-- prevenzione dell'invio di messaggi vuoti.
+e il quality gate verificato comprende:
 
----
+    npm run typecheck
+    npm run lint
+    npm test
+    npm run build
 
-## 15.4 Test della Chat API
+Tutti questi controlli risultano superati nella baseline corrente.
 
-Per:
+Per il Python Data Agent il quality gate verificato comprende:
 
-```http
-POST /api/chat
-```
+    ruff check app tests
+    pytest
 
-vengono verificati almeno i seguenti scenari.
+Anche questi controlli risultano superati nella baseline corrente.
 
-| Scenario | Risultato atteso |
-|----------|------------------|
-| Messaggio valido senza `sessionId` | Creazione di una nuova sessione. |
-| Messaggio valido con `sessionId` | Continuazione della sessione esistente. |
-| Messaggio vuoto | `400 Bad Request`. |
-| Messaggio composto solo da whitespace | `400 Bad Request`. |
-| Richiesta RAG | Utilizzo di `search_knowledge_base`. |
-| Richiesta analitica | Utilizzo di `analyze_manufacturing_data`. |
-| Richiesta ibrida | Utilizzo di entrambi i tool quando necessario. |
-| Risposta con grafico | Presenza di `chartUrl`. |
+Durante pytest può comparire uno `StarletteDeprecationWarning` proveniente dall'integrazione tra le versioni installate di FastAPI/Starlette TestClient e httpx. Il warning non corrisponde a un test fallito e non modifica l'esito della suite.
 
 ---
 
-## 15.5 Test del routing RAG
+## 15.3 DatasetRepository
 
-Un caso validato è:
+I test del `DatasetRepository` verificano il nuovo lifecycle del Manufacturing Dataset.
 
-```text
-What is the critical defect rate threshold?
-```
+Sono coperti scenari quali:
 
-Il risultato deve utilizzare:
+- caricamento iniziale lazy;
+- esecuzione del cleaning una sola volta durante la preparazione della cache;
+- riutilizzo del dataset preparato nelle analisi successive;
+- stato del repository prima del primo caricamento;
+- reload esplicito;
+- mantenimento della cache precedente quando un reload fallisce;
+- protezione del dataset cached da modifiche accidentali.
 
-```text
-search_knowledge_base
-```
-
-e recuperare la soglia dalla Manufacturing Quality Policy.
-
-La classificazione documentale deve essere basata sulla Knowledge Base e non su valori inventati dal modello.
+È inoltre verificato che più analisi possano riutilizzare lo stesso dataset preparato senza ripetere caricamento e cleaning a ogni richiesta.
 
 ---
 
-## 15.6 Test del Data Agent
+## 15.4 Chart retention
 
-Un caso validato è:
+La suite del Data Agent verifica il comportamento del `ChartCleanupService`.
 
-```text
-Which supplier has the highest defect rate?
-```
+I test coprono:
 
-Il sistema deve utilizzare:
+- identificazione dei grafici scaduti;
+- rimozione dei soli file appartenenti al pattern gestito;
+- preservazione dei file non interessati dal cleanup;
+- gestione della directory assente;
+- gestione race-safe di file già rimossi;
+- validazione della configurazione di retention.
 
-```text
-analyze_manufacturing_data
-```
-
-e calcolare il risultato a partire dal Manufacturing Dataset.
-
-Il valore risultante deve corrispondere ai dati elaborati dal Python Data Agent.
+Sono presenti inoltre test di integrazione sul lifecycle FastAPI per verificare l'avvio del meccanismo di cleanup e la gestione del relativo background task.
 
 ---
 
-## 15.7 Test del trend mensile
+## 15.5 AI Orchestrator
 
-La richiesta:
+I test dell'AI Orchestrator verificano:
 
-```text
-Show me the monthly defect rate trend.
-```
+- risposta finale senza tool;
+- utilizzo del Knowledge Base tool;
+- utilizzo del Data Agent tool;
+- orchestrazione con tool calling;
+- propagazione dei risultati dei tool;
+- raccolta dei tool effettivamente utilizzati;
+- aggregazione del token usage;
+- limite massimo dei tool round.
 
-deve:
+Il limite:
 
-1. essere delegata al Data Agent;
-2. produrre l'aggregazione mensile;
-3. generare la sintesi analitica;
-4. generare un grafico;
-5. fornire un `chartUrl` al frontend.
+    MAX_TOOL_ROUNDS = 5
 
-Questo scenario verifica contemporaneamente:
+è verificato esplicitamente.
 
-- Question Interpreter;
-- Pandas;
-- Matplotlib;
-- Data Agent API;
-- backend orchestration;
-- Chart Proxy;
-- frontend rendering.
+La suite controlla che, quando il modello continua a richiedere tool oltre il limite consentito, l'orchestrazione venga interrotta invece di entrare in un ciclo indefinito.
 
 ---
 
-## 15.8 Test delle richieste ibride
+## 15.6 Resilienza HTTP
 
-Le richieste ibride verificano la capacità del modello di combinare dati strutturati e Knowledge Base.
+Il componente condiviso utilizzato per le richieste HTTP resilienti è coperto da test dedicati.
 
-Esempio:
+Sono verificati:
 
-```text
-Which supplier has the highest defect rate and,
-according to company policy, what does that level mean?
-```
+- successo al primo tentativo;
+- retry su risposte `5xx`;
+- assenza di retry su risposte `4xx`;
+- retry su errori di rete transitori;
+- esaurimento dei tentativi disponibili;
+- restituzione dell'ultima risposta `5xx` dopo l'esaurimento dei retry;
+- timeout tramite `AbortController`;
+- validazione della configurazione.
 
-Il sistema deve poter utilizzare:
+Sono inoltre presenti test specifici per:
 
-```text
-analyze_manufacturing_data
-```
+- `DataAgentClient`;
+- `ChartClient`.
 
-e:
-
-```text
-search_knowledge_base
-```
-
-all'interno della stessa elaborazione.
-
-La risposta finale deve distinguere implicitamente tra:
-
-- fatto numerico derivato dal dataset;
-- interpretazione derivata dalla policy.
+In questo modo la policy di timeout/retry/backoff viene verificata sia a livello del componente condiviso sia nei client che la utilizzano.
 
 ---
 
-## 15.9 Test della memoria conversazionale
+## 15.7 RAG relevance filtering
 
-La gestione della sessione viene verificata attraverso richieste consecutive.
+I test del `RetrieverService` verificano il filtro di rilevanza introdotto sui risultati ChromaDB.
 
-Esempio:
+Sono coperti:
 
-```text
-User:
-Which supplier has the highest defect rate?
+- risultati con distanza inferiore alla soglia;
+- risultato esattamente sulla soglia;
+- esclusione dei risultati oltre soglia;
+- esclusione delle distanze mancanti;
+- esclusione delle distanze non valide;
+- possibilità di ottenere zero risultati rilevanti;
+- validazione del valore configurato per `maxDistance`.
 
-Assistant:
-SUP-07 ...
+La configurazione corrente utilizza:
 
-User:
-What would happen if that supplier reached 3.2%?
-```
+    maxDistance = 0.70
 
-Il secondo messaggio deve poter utilizzare il contesto precedente per interpretare:
-
-```text
-that supplier
-```
-
-La continuità viene mantenuta attraverso:
-
-```text
-sessionId
-lastResponseId
-previous_response_id
-```
+Oltre ai test automatizzati, la soglia è stata validata empiricamente sul corpus corrente con query pertinenti e non pertinenti in inglese e italiano.
 
 ---
 
-## 15.10 Test bilingue
+## 15.8 Environment configuration e fail-fast
 
-Il sistema viene verificato con richieste sia in inglese sia in italiano.
+I test della configurazione verificano il requisito obbligatorio:
 
-Esempio:
+    OPENAI_API_KEY
 
-```text
-What happens above a 4% supplier defect rate?
-```
+Sono coperti almeno i casi:
 
-e:
+- variabile presente e valida;
+- variabile assente;
+- valore vuoto;
+- valore composto esclusivamente da whitespace.
 
-```text
-Cosa succede se il defect rate di un fornitore supera il 4%?
-```
-
-Il sistema deve:
-
-- comprendere entrambe le richieste;
-- selezionare gli strumenti corretti;
-- rispondere nella lingua della domanda.
+L'obiettivo è garantire che una configurazione OpenAI non valida venga rilevata durante l'inizializzazione anziché soltanto alla prima richiesta AI.
 
 ---
 
-## 15.11 Test delle dipendenze non disponibili
+## 15.9 Rate limiting
 
-Sono stati verificati scenari di failure controllata.
+I test di integrazione della Chat API verificano il rate limiter utilizzando una configurazione controllata.
 
-### Data Agent non disponibile
+La suite verifica che:
 
-Risultato atteso:
+1. le richieste entro il limite vengano accettate;
+2. la richiesta che supera il limite riceva `429 Too Many Requests`;
+3. una richiesta già limitata non raggiunga il `ChatService`.
 
-```text
-503 Service Unavailable
-```
-
-con messaggio controllato relativo al servizio analitico.
-
-### ChromaDB non disponibile
-
-Risultato atteso:
-
-```text
-503 Service Unavailable
-```
-
-con messaggio controllato relativo alla Knowledge Base.
-
-Questi test verificano che il backend non trasformi un errore infrastrutturale in una risposta AI apparentemente valida.
+Il terzo punto è particolarmente importante perché dimostra che il rate limiter viene applicato prima dell'esecuzione della parte potenzialmente a pagamento della pipeline AI.
 
 ---
 
-## 15.12 Test del Chart Proxy
+## 15.10 Structured observability
 
-Per:
+I test di integrazione verificano il middleware di osservabilità della Chat API.
 
-```http
-GET /api/charts/:filename
-```
+Sono coperti:
 
-vengono verificati:
+- generazione del request ID;
+- header `X-Request-Id`;
+- registrazione dell'esito della richiesta;
+- registrazione della latenza;
+- registrazione dei tool utilizzati;
+- registrazione del token usage;
+- osservabilità delle richieste valide;
+- osservabilità delle richieste `400 Bad Request`;
+- osservabilità delle richieste `429 Too Many Requests`.
 
-- recupero del PNG valido;
-- inoltro verso il Data Agent;
-- Content-Type dell'immagine;
-- filename valido;
-- protezione da path traversal;
-- gestione del file non disponibile.
-
----
-
-## 15.13 Validazione manuale end-to-end
-
-Oltre ai test automatizzati sono stati eseguiti scenari manuali con tutti i principali servizi attivi:
-
-```text
-React
-Node.js
-Python Data Agent
-ChromaDB
-OpenAI
-```
-
-Le verifiche hanno incluso:
-
-- risposta documentale;
-- risposta analitica;
-- risposta ibrida;
-- grafico;
-- session memory;
-- italiano;
-- inglese;
-- validazione input;
-- failure delle dipendenze.
+È inoltre verificato che il token usage rimanga un metadato interno e non venga aggiunto al contratto pubblico restituito al frontend.
 
 ---
 
-## 15.14 Relazione con il Test Plan
+## 15.11 Token usage multi-round
 
-La strategia completa di testing, i livelli di verifica e i casi di test vengono descritti nel documento:
+La suite dell'AI Orchestrator verifica esplicitamente l'aggregazione del consumo su più round OpenAI.
 
-```text
-docs/it/06_Test_Plan.md
-```
+Un caso di test equivalente a:
 
-La presente API Specification documenta esclusivamente gli aspetti di testing direttamente rilevanti per i contratti e i comportamenti API.
+    Round 1
+    input_tokens  = 100
+    output_tokens = 20
+
+    Round 2
+    input_tokens  = 200
+    output_tokens = 30
+
+deve produrre:
+
+    inputTokens  = 300
+    outputTokens = 50
+    totalTokens  = 350
+
+Questo impedisce di sottostimare il consumo delle richieste agentiche considerando soltanto l'ultima chiamata al provider.
+
+---
+
+## 15.12 Chat API integration tests
+
+I test di integrazione della Chat API verificano scenari quali:
+
+- risposta conversazionale valida;
+- propagazione di un `sessionId` esistente;
+- rifiuto di un messaggio mancante;
+- rifiuto di un `sessionId` con tipo non valido;
+- rate limiting;
+- raccolta dei dati di osservabilità.
+
+La suite verifica contemporaneamente il contratto HTTP pubblico e il comportamento dei middleware applicativi.
+
+---
+
+## 15.13 Data Agent analytical regression
+
+Le analisi del Data Agent sono verificate anche rispetto ai KPI attesi del dataset preparato.
+
+La baseline analitica corrente comprende:
+
+    total_production = 164060
+    defective_units = 3272
+    defect_rate = 1.99
+    rework_rate = 0.96
+    scrap_rate = 0.51
+    average_quality_score = 95.82
+    average_downtime_minutes = 33.04
+    average_cycle_time_seconds = 84.74
+
+Il mantenimento di questi valori dopo l'introduzione del `DatasetRepository` dimostra che l'ottimizzazione del lifecycle del dataset non ha modificato il risultato analitico atteso.
+
+---
+
+## 15.14 Test manuali e full-stack
+
+Oltre alle suite automatizzate, il progetto è stato verificato attraverso scenari end-to-end rappresentativi.
+
+Tra questi:
+
+### RAG
+
+    When should a production issue be escalated according to company policy?
+
+Il sistema utilizza la Knowledge Base e produce una risposta grounded nelle policy aziendali simulate.
+
+### Data Agent
+
+    Show me the monthly defect rate trend.
+
+Il sistema utilizza il Data Agent, produce la sintesi analitica e rende disponibile il grafico mensile.
+
+### Conversation memory
+
+Una richiesta successiva può fare riferimento a un'entità già introdotta nella conversazione, ad esempio:
+
+    What about that supplier?
+
+Il backend mantiene il contesto tramite `sessionId` e stato conversazionale server-side.
+
+---
+
+## 15.15 Obiettivo della suite
+
+La suite non verifica soltanto il comportamento nominale delle API.
+
+La baseline corrente copre anche failure mode e application boundary introdotti per rendere l'architettura più robusta:
+
+- dataset I/O ripetuto;
+- accumulo dei grafici runtime;
+- tool loop non terminanti;
+- failure HTTP transitorie;
+- retrieval semanticamente debole;
+- configurazione OpenAI mancante;
+- abuso o consumo eccessivo della Chat API;
+- osservabilità insufficiente delle richieste agentiche.
+
+L'obiettivo è mantenere l'architettura testabile e verificabile anche quando vengono introdotte protezioni operative che non modificano il normale contratto utente.
 
 ---
 
 # 16. Evoluzioni future
 
-## 16.1 Panoramica
+## 16.1 Principio generale
 
-L'architettura API corrente è sufficiente per lo scope accademico e portfolio del progetto, ma è stata progettata in modo da consentire evoluzioni successive.
+L'architettura corrente soddisfa il perimetro funzionale del progetto e include una serie di protezioni operative introdotte durante la fase di hardening.
 
-Le funzionalità descritte in questo capitolo non devono essere interpretate come già implementate.
+Le evoluzioni descritte in questo capitolo rappresentano possibili estensioni per scenari con:
+
+- dataset significativamente più grandi;
+- più utenti concorrenti;
+- deployment distribuito;
+- requisiti enterprise di sicurezza;
+- requisiti avanzati di osservabilità;
+- nuove sorgenti documentali o analitiche.
+
+Le funzionalità indicate come future non devono essere interpretate come già implementate nella versione corrente.
 
 ---
 
-## 16.2 Persistenza delle conversazioni
+## 16.2 Evoluzione del layer analitico oltre Pandas
 
-Attualmente le sessioni sono memorizzate in-memory.
+Il Data Agent corrente utilizza Pandas.
 
-Una futura implementazione potrebbe utilizzare:
+Questa scelta rimane appropriata per il Manufacturing Dataset del progetto, composto da circa 2.000 record, e mantiene coerenza con i requisiti dell'assignment.
+
+L'introduzione del `DatasetRepository` elimina inoltre il precedente costo di caricamento e cleaning ripetuto per ogni richiesta, consentendo di riutilizzare il DataFrame preparato durante il lifecycle del processo.
+
+Per dataset dell'ordine di centinaia di migliaia o milioni di record, oppure quando il dataset non può essere mantenuto efficientemente in memoria, il layer di accesso ai dati dovrebbe essere rivalutato.
+
+Possibili evoluzioni includono:
+
+### DuckDB
+
+DuckDB rappresenterebbe una naturale evoluzione per workload analitici locali o embedded.
+
+Potrebbe consentire:
+
+- query SQL direttamente sui dati tabellari;
+- aggregazioni efficienti;
+- minore dipendenza dal caricamento completo del dataset in memoria;
+- utilizzo efficace di formati analitici come Parquet;
+- mantenimento di un deployment relativamente semplice.
+
+### SQLite
+
+SQLite potrebbe essere valutato quando siano utili:
+
+- persistenza locale strutturata;
+- query SQL;
+- indicizzazione;
+- gestione di dataset relazionali di dimensione moderata.
+
+Per workload prevalentemente OLAP e analitici, DuckDB sarebbe generalmente il candidato più naturale tra le due opzioni; SQLite rimane una possibile alternativa per scenari maggiormente orientati alla persistenza relazionale embedded.
+
+### Database esterno
+
+Per scenari multiutente o distribuiti potrebbe diventare appropriato un database esterno gestito.
+
+Il percorso evolutivo può essere rappresentato come:
+
+    Current Dataset
+    ~2,000 rows
+         |
+         v
+    Pandas
+    + DatasetRepository
+         |
+         | dataset growth /
+         | memory pressure
+         v
+    DuckDB / SQLite
+         |
+         | distributed scale /
+         | multi-user requirements
+         v
+    External Data Platform
+
+Nessuna di queste migrazioni è implementata nella versione corrente.
+
+La scelta intenzionale è mantenere Pandas per il perimetro attuale e definire chiaramente il punto nel quale un motore query-oriented diventerebbe architetturalmente preferibile.
+
+---
+
+## 16.3 Persistenza distribuita delle conversazioni
+
+Il `ConversationManager` corrente mantiene lo stato conversazionale in memoria.
+
+Per un deployment distribuito o multi-instance, una possibile evoluzione sarebbe utilizzare uno storage condiviso, ad esempio:
 
 - Redis;
-- PostgreSQL;
-- MongoDB;
-- un database gestito;
-- una cache distribuita.
+- database relazionale;
+- session store dedicato.
 
-Questo permetterebbe di mantenere le conversazioni anche dopo il riavvio del backend.
+Questo consentirebbe di mantenere la continuità delle sessioni anche tra più istanze del backend.
 
 ---
 
-## 16.3 Conversation Management API
+## 16.4 Autenticazione e autorizzazione
 
-Con una persistenza delle sessioni potrebbero essere aggiunti endpoint come:
+La Chat API dispone attualmente di rate limiting, ma non implementa autenticazione degli utenti.
 
-```text
-GET /api/conversations
-GET /api/conversations/:id
-DELETE /api/conversations/:id
-```
-
-Questi endpoint non appartengono alla versione corrente.
-
----
-
-## 16.4 Authentication and Authorization
-
-Una versione enterprise potrebbe introdurre:
+Una futura versione production-grade potrebbe introdurre:
 
 - OAuth 2.0;
 - OpenID Connect;
-- JWT;
 - Single Sign-On;
-- Role-Based Access Control.
+- JWT validation;
+- Role-Based Access Control;
+- API key per integrazioni service-to-service.
 
-Questo permetterebbe di associare l'accesso alla Knowledge Base al ruolo dell'utente.
-
----
-
-## 16.5 Role-Based Knowledge Access
-
-La Knowledge Base potrebbe essere estesa con metadati relativi ai ruoli autorizzati.
-
-Esempio:
-
-```text
-Operator
-Quality Engineer
-Quality Manager
-Administrator
-```
-
-Il retrieval potrebbe quindi applicare filtri di autorizzazione prima di restituire i documenti al modello.
+L'autenticazione permetterebbe inoltre di applicare quote e policy di utilizzo per identità anziché affidarsi esclusivamente alla chiave utilizzata dal rate limiter.
 
 ---
 
-## 16.6 Persistenza e gestione dei grafici
+## 16.5 API management e protezione perimetrale
 
-I grafici vengono attualmente trattati come artefatti runtime.
+In un deployment enterprise il backend potrebbe essere posizionato dietro:
 
-Una futura versione potrebbe utilizzare:
+- API gateway;
+- reverse proxy gestito;
+- Web Application Firewall;
+- policy centralizzate di rate limiting;
+- request size limits;
+- IP filtering;
+- network policy.
 
-- object storage;
-- URL temporanei;
-- retention policy;
-- cleanup automatico;
-- CDN.
-
----
-
-## 16.7 API Versioning
-
-La versione corrente non utilizza:
-
-```text
-/api/v1
-```
-
-Un versionamento esplicito potrebbe diventare utile quando esistono contemporaneamente più contratti incompatibili.
-
-Esempio futuro:
-
-```text
-/api/v1/chat
-/api/v2/chat
-```
+Il rate limiting applicativo corrente rappresenta una baseline, non sostituisce un layer perimetrale enterprise.
 
 ---
 
-## 16.8 Nuovi tool
+## 16.6 Osservabilità centralizzata
 
-L'AI Orchestrator può essere esteso aggiungendo ulteriori function tool.
+La versione corrente implementa già:
 
-Esempi possibili:
+- request ID;
+- `X-Request-Id`;
+- logging strutturato;
+- status code;
+- latenza;
+- tool usage;
+- token usage aggregato.
 
-```text
-search_maintenance_records
-analyze_supplier_performance
-query_inventory_data
-create_quality_report
-```
+Le evoluzioni future riguardano quindi la **centralizzazione e distribuzione** dell'osservabilità, non la sua introduzione di base.
 
-L'architettura del tool execution loop permette di introdurre nuove capacità senza modificare il principio generale della Chat API.
+Possibili estensioni includono:
 
----
-
-## 16.9 Nuove analisi del Data Agent
-
-Il Python Data Agent potrebbe supportare ulteriori analisi deterministiche.
-
-Esempi:
-
-- correlazioni;
-- anomaly detection;
-- confronto tra periodi;
-- rolling averages;
-- supplier trend analysis;
-- advanced quality KPIs;
-- forecasting.
-
-Le nuove funzionalità potrebbero essere aggiunte mantenendo invariato:
-
-```http
-POST /api/analysis
-```
-
----
-
-## 16.10 Nuove sorgenti dati
-
-Il Manufacturing Dataset CSV potrebbe essere sostituito o affiancato da:
-
-- database relazionale;
-- Data Lake;
-- Data Warehouse;
-- Lakehouse;
-- REST API enterprise;
-- sistemi MES;
-- sistemi ERP;
-- piattaforme analytics.
-
-Il Data Agent potrebbe continuare a mantenere lo stesso boundary HTTP verso il backend.
-
----
-
-## 16.11 Evoluzione del RAG
-
-La Knowledge Base potrebbe essere estesa con:
-
-- nuovi documenti;
-- documenti PDF;
-- nuovi metadati;
-- filtri per reparto;
-- filtri per ruolo;
-- versioning documentale;
-- re-indexing automatizzato.
-
-ChromaDB potrebbe inoltre essere sostituito da un vector store gestito senza modificare il contratto utilizzato dal frontend.
-
----
-
-## 16.12 Observability enterprise
-
-Una futura versione potrebbe introdurre:
-
-- structured logs;
-- correlation IDs;
 - OpenTelemetry;
 - distributed tracing;
-- dashboards;
-- application metrics;
-- latency percentiles;
-- tool usage statistics;
-- alerting.
+- Prometheus;
+- Grafana;
+- centralized log aggregation;
+- dashboard operative;
+- alerting;
+- analisi storica dei costi e dei token.
+
+Questo permetterebbe di correlare una singola richiesta tra backend, Data Agent, vector database e provider AI.
 
 ---
 
-## 16.13 Deployment cloud
+## 16.7 Persistenza delle metriche AI
 
-I componenti potrebbero essere distribuiti separatamente su infrastruttura cloud.
+Il token usage viene attualmente raccolto per la richiesta e utilizzato nell'osservabilità del backend.
 
-Il principio rimarrebbe:
+Una futura evoluzione potrebbe persistere metriche quali:
 
-```text
-Frontend
-    |
-    v
-Backend
-   / \
-  /   \
-RAG   Data Agent
-```
+- input tokens;
+- output tokens;
+- total tokens;
+- modello utilizzato;
+- tool utilizzati;
+- latenza;
+- costo stimato;
+- request ID;
+- timestamp.
 
-con il backend come unico punto di orchestrazione applicativa.
+Questo consentirebbe analisi storiche su consumo e performance senza modificare il contratto pubblico della Chat API.
+
+---
+
+## 16.8 Evoluzione della Knowledge Base
+
+La Knowledge Base corrente utilizza documenti locali controllati e ChromaDB.
+
+Possibili evoluzioni includono:
+
+- ingestion incrementale;
+- versionamento documentale;
+- document lifecycle management;
+- metadati più ricchi;
+- filtri per categoria o versione;
+- re-indexing selettivo;
+- supporto a repository documentali esterni.
+
+Ogni modifica significativa del corpus o dell'embedding model dovrebbe inoltre prevedere una nuova calibrazione del relevance threshold utilizzato dal retriever.
+
+---
+
+## 16.9 Evoluzione del relevance filtering
+
+La soglia corrente:
+
+    maxDistance = 0.70
+
+è stata calibrata empiricamente sul corpus e sull'embedding model attuali.
+
+Con una Knowledge Base più ampia potrebbe essere utile introdurre:
+
+- benchmark di retrieval più estesi;
+- evaluation dataset dedicato;
+- metriche Precision@K e Recall@K;
+- reranking;
+- threshold specifici per dominio;
+- hybrid search semantica e keyword-based.
+
+La soglia non dovrebbe essere considerata immutabile rispetto all'evoluzione del corpus.
+
+---
+
+## 16.10 Chart storage distribuito
+
+La versione corrente implementa già una retention automatica locale dei grafici runtime.
+
+Per deployment multi-instance o containerizzati, una futura evoluzione potrebbe sostituire lo storage locale con:
+
+- object storage;
+- blob storage;
+- URL firmati;
+- CDN;
+- lifecycle policy gestite dall'infrastruttura.
+
+In questo scenario la retention potrebbe essere delegata al servizio di storage invece che al filesystem locale del Data Agent.
+
+---
+
+## 16.11 Dataset refresh automatizzato
+
+Il `DatasetRepository` espone un meccanismo esplicito di reload.
+
+La versione corrente non implementa un refresh automatico del Manufacturing Dataset.
+
+In uno scenario con dati aggiornati dinamicamente si potrebbero introdurre:
+
+- invalidazione temporale della cache;
+- refresh schedulato;
+- refresh event-driven;
+- versionamento del dataset;
+- controllo della data di modifica della sorgente.
+
+Qualunque strategia dovrebbe mantenere la proprietà attuale per cui un refresh fallito non invalida un dataset precedentemente utilizzabile.
+
+---
+
+## 16.12 Scalabilità orizzontale
+
+Per aumentare il numero di utenti concorrenti potrebbero essere introdotti:
+
+- più backend instance;
+- più Data Agent instance;
+- session storage condiviso;
+- load balancing;
+- storage grafici condiviso;
+- metriche e tracing distribuiti.
+
+Questa evoluzione richiederebbe di rivedere le componenti che oggi mantengono stato locale al processo.
+
+---
+
+## 16.13 CI/CD
+
+Una pipeline CI/CD potrebbe automatizzare:
+
+- backend type checking;
+- backend lint;
+- backend test;
+- backend build;
+- Data Agent lint;
+- Data Agent test;
+- frontend lint;
+- frontend build;
+- dependency checks;
+- build degli artefatti;
+- deployment.
+
+La suite automatizzata corrente costituisce la base per introdurre questi quality gate in pipeline.
+
+---
+
+## 16.14 Evoluzione dei provider AI
+
+L'architettura potrebbe essere ulteriormente astratta per supportare provider AI differenti.
+
+Una possibile evoluzione sarebbe introdurre un'interfaccia applicativa dedicata al provider per separare maggiormente:
+
+- orchestrazione;
+- tool calling;
+- token usage;
+- conversation continuation;
+- modello AI specifico.
+
+Qualunque migrazione dovrebbe preservare il principio fondamentale del sistema:
+
+> il modello decide autonomamente, entro application boundary espliciti, quali capacità utilizzare per rispondere alla richiesta.
+
+---
+
+## 16.15 Principio evolutivo
+
+Le evoluzioni future non richiedono di abbandonare l'architettura corrente.
+
+I principali boundary sono già separati:
+
+    React Frontend
+          |
+          v
+    Node.js Backend
+          |
+          +---- AI Orchestration
+          |
+          +---- RAG / ChromaDB
+          |
+          +---- Python Data Agent
+
+Questo consente di evolvere separatamente:
+
+- presentation layer;
+- orchestration layer;
+- retrieval layer;
+- analytical layer;
+- persistence layer;
+- observability layer;
+- security layer.
+
+La versione corrente privilegia semplicità, testabilità e coerenza con il perimetro del progetto, mantenendo un percorso esplicito verso requisiti di scala e sicurezza superiori.
 
 ---
 

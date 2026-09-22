@@ -348,6 +348,35 @@ The Node.js Backend exposes generated charts through:
 
 The Chart Proxy validates requested filenames and prevents arbitrary path traversal.
 
+Generated chart files are managed by a dedicated `ChartCleanupService` in the Python Data Agent.
+
+The default lifecycle configuration is:
+
+    chart_retention_hours = 24.0
+    chart_cleanup_interval_minutes = 60.0
+
+The Data Agent performs:
+
+    Application startup
+            ↓
+    Immediate cleanup
+            ↓
+    Periodic cleanup every 60 minutes
+            ↓
+    Graceful task cancellation on shutdown
+
+Only application-managed chart files matching:
+
+    monthly_defect_rate_*.png
+
+are eligible for automatic deletion.
+
+Files older than the configured retention period are removed, while unrelated files in the chart directory are left untouched.
+
+This prevents generated PNG files from accumulating indefinitely during repeated analytical usage while keeping cleanup behavior scoped to files owned by the application.
+
+The retention duration and cleanup interval can be configured through the Data Agent settings when a different runtime policy is required.
+
 ---
 
 ## Controlled Failure Handling
@@ -540,7 +569,8 @@ Its responsibilities include:
 
 - generating semantic query embeddings;
 - searching the configured ChromaDB collection;
-- retrieving relevant document chunks;
+- retrieving candidate document chunks;
+- filtering candidates by semantic relevance;
 - preserving source metadata;
 - returning grounded enterprise context to the orchestration layer.
 
@@ -548,6 +578,28 @@ The RAG implementation uses:
 
     ChromaDB
     OpenAI text-embedding-3-small
+
+The retriever does not automatically treat every returned nearest-neighbor candidate as relevant.
+
+Candidate chunks are filtered using the configured maximum semantic distance:
+
+    maxDistance = 0.70
+
+A candidate is accepted only when it contains a valid finite distance and that distance is less than or equal to the configured threshold.
+
+Candidates with:
+
+- a distance greater than `0.70`;
+- a missing distance;
+- or an invalid distance
+
+are excluded from the grounded context.
+
+As a result, retrieval can legitimately return zero chunks when the Knowledge Base does not contain sufficiently relevant evidence. This is preferable to injecting weakly related policy text into the orchestration context.
+
+The `0.70` threshold was selected through empirical validation against the current Knowledge Base and embedding model. Validation included relevant English and Italian queries, borderline manufacturing questions and clearly unrelated requests.
+
+The threshold is therefore a project-specific calibration rather than a universal semantic-search constant. It should be re-evaluated if the Knowledge Base, chunking strategy or embedding model changes.
 
 The Knowledge Base is stored locally and indexed before the application is used.
 
@@ -559,8 +611,9 @@ The Python Data Agent is an independent FastAPI microservice responsible for str
 
 Its responsibilities include:
 
-- loading the Manufacturing Dataset;
+- loading and preparing the Manufacturing Dataset;
 - cleaning known data-quality issues;
+- caching the prepared dataset for repeated analytical requests;
 - interpreting supported analytical requests;
 - calculating manufacturing KPIs;
 - executing grouped analyses;
@@ -575,6 +628,30 @@ The service uses:
     FastAPI
     Pandas
     Matplotlib
+
+Dataset access is managed through a dedicated `DatasetRepository`.
+
+The repository uses lazy per-process caching:
+
+    First analytical request
+              ↓
+    Load CSV from disk
+              ↓
+    Apply deterministic cleaning
+              ↓
+    Cache prepared DataFrame
+              ↓
+    Reuse for subsequent requests
+
+This avoids repeating CSV loading and data-cleaning work for every `POST /api/analysis` request.
+
+The prepared dataset is loaded only when first required by an analysis. Subsequent analyses reuse the cached prepared DataFrame for the lifetime of the Data Agent process.
+
+An explicit `reload()` operation is available when the underlying dataset must be refreshed. Reloading rebuilds the prepared dataset, while a failed reload preserves the previously valid cached dataset instead of replacing it with an invalid state.
+
+The repository also protects the cached source DataFrame from accidental mutation by analytical consumers.
+
+This design is appropriate for the current synthetic dataset and Pandas-based analytical scope while removing unnecessary repeated disk I/O and cleaning overhead.
 
 The Data Agent does not depend on the LLM to calculate numerical results.
 
@@ -981,7 +1058,7 @@ Create the local environment file:
 
     cp .env.example .env
 
-The root .env file configures the Node.js Backend and its external service integrations.
+The root `.env` file configures the Node.js Backend and its external service integrations.
 
 The React Frontend uses a default local Backend URL and therefore does not require a separate environment file for the standard local setup.
 
@@ -1005,28 +1082,49 @@ A valid OpenAI API key is required:
 
     OPENAI_API_KEY=<your-openai-api-key>
 
-The application uses the following environment variables:
+`OPENAI_API_KEY` is a required Backend configuration value.
 
+The Backend validates it during configuration loading and fails fast when the variable is missing, empty, or contains only whitespace. This prevents the application from starting with an incomplete AI provider configuration that would otherwise fail only when processing a user request.
+
+The Backend supports the following environment variables:
+
+    NODE_ENV
+    PORT
+    DATA_AGENT_URL
+    CHROMA_URL
+    CHROMA_COLLECTION
     OPENAI_API_KEY
     OPENAI_EMBEDDING_MODEL
     LLM_MODEL
     LLM_TEMPERATURE
     LLM_TIMEOUT_SECONDS
-    PORT
-    DATA_AGENT_URL
-    CHROMA_URL
-    CHROMA_COLLECTION
+    CHAT_RATE_LIMIT_WINDOW_MINUTES
+    CHAT_RATE_LIMIT_MAX_REQUESTS
 
-The validated local configuration is:
+The validated local configuration and defaults are:
 
-    OPENAI_EMBEDDING_MODEL=text-embedding-3-small
-    LLM_MODEL=gpt-5-mini
-    LLM_TEMPERATURE=0.0
-    LLM_TIMEOUT_SECONDS=30
+    NODE_ENV=development
     PORT=3000
     DATA_AGENT_URL=http://127.0.0.1:8001
     CHROMA_URL=http://127.0.0.1:8000
     CHROMA_COLLECTION=maranello_ai_knowledge_base
+    OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+    LLM_MODEL=gpt-5-mini
+    LLM_TEMPERATURE=0.0
+    LLM_TIMEOUT_SECONDS=30
+    CHAT_RATE_LIMIT_WINDOW_MINUTES=15
+    CHAT_RATE_LIMIT_MAX_REQUESTS=30
+
+The Chat API rate-limit defaults therefore allow up to 30 requests within a 15-minute window.
+
+The Python Data Agent also defines runtime settings for generated-chart lifecycle management:
+
+    chart_retention_hours=24.0
+    chart_cleanup_interval_minutes=60.0
+
+These settings control how long managed chart PNG files are retained and how frequently the background cleanup task runs.
+
+They are Data Agent settings rather than Node.js Backend variables. The current defaults are sufficient for the standard local setup, so no additional Data Agent environment configuration is required to run the project with the validated defaults.
 
 The real `.env` file must remain local and must never be committed to Git.
 
@@ -1199,8 +1297,8 @@ The validated project state passes all four checks.
 
 The final Backend automated test suite contains:
 
-    15 test files
-    89 tests
+    18 test files
+    120 tests
 
 Return to the repository root:
 
@@ -2376,8 +2474,8 @@ The Node.js Backend includes an automated test suite covering the main applicati
 
 The final validated Backend test suite contains:
 
-    15 test files
-    89 tests
+    18 test files
+    120 tests
 
 All tests pass in the validated project state.
 
@@ -2385,12 +2483,23 @@ The test suite covers areas including:
 
 - request validation;
 - conversation management;
-- AI orchestration;
-- function calling;
-- tool execution;
-- RAG integration boundaries;
+- AI orchestration and native function calling;
+- bounded tool execution through `MAX_TOOL_ROUNDS`;
+- tool execution and multi-round token-usage aggregation;
+- RAG integration boundaries and semantic-distance filtering;
+- acceptance and rejection behavior around the `maxDistance = 0.70` threshold;
 - Python Data Agent integration boundaries;
-- chart handling;
+- resilient inter-service HTTP requests;
+- request timeouts through `AbortController`;
+- retries for transient network failures and HTTP `5xx` responses;
+- backoff behavior and non-retry behavior for HTTP `4xx` responses;
+- Data Agent client behavior;
+- chart client and chart-proxy handling;
+- required OpenAI credential validation and fail-fast configuration;
+- Chat API rate limiting;
+- structured request observability;
+- request ID propagation;
+- HTTP status, latency, tool-usage and token-usage observability metadata;
 - controlled error behavior;
 - application services.
 
@@ -2675,7 +2784,38 @@ From the repository root, with the Python virtual environment activated, the fin
 
     ruff check data_agent
 
+The final validated Data Agent test suite contains:
+
+    80 automated tests
+
+The automated suite covers areas including:
+
+- dataset loading and deterministic cleaning;
+- analytical question interpretation;
+- manufacturing KPI calculations;
+- grouped and monthly analyses;
+- chart generation;
+- API behavior;
+- `DatasetRepository` lazy caching;
+- reuse of the prepared dataset across multiple analyses;
+- explicit dataset reload behavior;
+- preservation of the previously valid cache when a reload fails;
+- protection of the cached dataset from accidental analytical mutation;
+- `ChartCleanupService` retention behavior;
+- cleanup restricted to application-managed `monthly_defect_rate_*.png` files;
+- safe behavior when the chart directory is absent;
+- FastAPI lifespan cleanup at startup;
+- periodic chart cleanup during runtime;
+- graceful cleanup-task cancellation during application shutdown.
+
 These commands were successfully executed against the validated project state.
+
+The final validation produced:
+
+    Pytest: 80 passed
+    Ruff: All checks passed
+
+The test execution also reported one `StarletteDeprecationWarning` originating from the installed FastAPI/Starlette testing dependency stack. It does not represent a failing project test or an application runtime error.
 
 ---
 
@@ -2708,6 +2848,12 @@ The repository provides:
 with placeholders and non-sensitive configuration values.
 
 Before final delivery, repository hygiene includes verifying that no real API key or other sensitive value is tracked by Git.
+
+The Backend treats `OPENAI_API_KEY` as required configuration.
+
+At startup, the value is trimmed and validated. If the variable is missing, empty or contains only whitespace, configuration loading fails immediately rather than allowing the application to start in a partially configured state.
+
+This fail-fast behavior makes configuration errors explicit before a paid AI request can be attempted.
 
 ---
 
@@ -2797,6 +2943,34 @@ This prevents arbitrary path traversal through the chart endpoint.
 
 ---
 
+## Chat API Protection
+
+The conversational endpoint:
+
+    POST /api/chat
+
+is protected by application-level rate limiting.
+
+The validated default policy allows:
+
+    30 requests
+    per 15-minute window
+
+The policy is configurable through:
+
+    CHAT_RATE_LIMIT_WINDOW_MINUTES
+    CHAT_RATE_LIMIT_MAX_REQUESTS
+
+When the configured limit is exceeded, the Backend returns:
+
+    HTTP 429 Too Many Requests
+
+The limiter is applied before the request reaches the paid AI orchestration path, preventing excessive requests from unnecessarily invoking the model.
+
+This protection is intentionally lightweight and appropriate for the current project scope. It does not replace user authentication, role-based authorization, enterprise identity controls or distributed rate limiting, which remain production-oriented extensions.
+
+---
+
 # Resilience
 
 Maranello AI treats specialized AI capabilities as dependencies that can fail independently.
@@ -2827,6 +3001,43 @@ The desired behavior is:
     unavailable evidence
           ↓
     explicit controlled failure
+
+---
+
+## Bounded Agentic Execution
+
+The autonomous tool-calling loop is explicitly bounded.
+
+The Backend defines:
+
+    MAX_TOOL_ROUNDS = 5
+
+Each round may allow the model to request one or more supported tools, but execution cannot continue indefinitely.
+
+If the maximum number of tool-calling rounds is reached before a final assistant answer is produced, orchestration stops with a controlled error.
+
+This protects the application from unbounded agentic loops, excessive dependency calls and uncontrolled AI API consumption while preserving autonomous routing within a defined execution boundary.
+
+---
+
+## Resilient Inter-Service HTTP
+
+Backend communication with the Python Data Agent uses a shared resilient HTTP request mechanism.
+
+The mechanism provides:
+
+- explicit request timeouts through `AbortController`;
+- retries for transient network failures;
+- retries for transient HTTP `5xx` responses;
+- backoff between retry attempts;
+- no automatic retry for HTTP `4xx` responses;
+- controlled failure after the configured attempts are exhausted.
+
+The same mechanism is reused by the Data Agent analysis client and the chart client, avoiding duplicated network-resilience behavior.
+
+The distinction between transient and non-transient failures is intentional. Server-side or network failures may succeed on a later attempt, while client-side `4xx` responses normally indicate a request that should not be repeated automatically.
+
+Together, bounded agentic execution and resilient dependency communication reduce the risk that temporary failures or repeated model tool requests become uncontrolled execution.
 
 ---
 
@@ -3026,6 +3237,96 @@ This is sufficient for the local educational and portfolio scope of the project.
 A production deployment could replace this with distributed persistence such as a database or cache without changing the main conversational contract.
 
 Persistent distributed conversation storage is therefore considered a future enhancement rather than an incomplete requirement.
+
+---
+
+## ADR-10 — Prepared Dataset Cache
+
+The Python Data Agent uses a dedicated `DatasetRepository` to lazily load, clean and cache the prepared Manufacturing Dataset once per process.
+
+Repeated analytical requests reuse the prepared dataset instead of repeating CSV loading and deterministic cleaning.
+
+An explicit reload operation is available when the source dataset must be refreshed, and a failed reload preserves the previously valid cache.
+
+This decision removes unnecessary repeated disk I/O and preparation work while retaining the Pandas-based analytical architecture required by the current project scope.
+
+---
+
+## ADR-11 — Bounded Agentic Tool Execution
+
+Autonomous LLM tool execution is bounded through:
+
+    MAX_TOOL_ROUNDS = 5
+
+The model remains responsible for deciding whether and which supported tools to invoke, but orchestration cannot continue through an unlimited sequence of tool-calling rounds.
+
+If the execution boundary is reached before a final assistant response is produced, the Backend terminates orchestration with a controlled error.
+
+This preserves autonomous routing while protecting the application from unbounded loops and uncontrolled dependency or AI API consumption.
+
+---
+
+## ADR-12 — Resilient Inter-Service HTTP
+
+Communication from the Node.js Backend to the Python Data Agent uses a shared resilient HTTP mechanism.
+
+The mechanism provides explicit timeouts through `AbortController`, retries transient network failures and HTTP `5xx` responses, applies backoff between attempts and does not automatically retry HTTP `4xx` responses.
+
+The same behavior is reused by both analytical requests and chart retrieval.
+
+Centralizing this policy avoids duplicated resilience logic and gives internal service failures consistent behavior.
+
+---
+
+## ADR-13 — RAG Relevance Threshold
+
+Semantic nearest-neighbor retrieval is not treated as sufficient evidence by itself.
+
+The RAG retriever applies:
+
+    maxDistance = 0.70
+
+and accepts only candidates with a valid finite semantic distance less than or equal to that threshold.
+
+Retrieval may therefore return zero chunks when no sufficiently relevant Knowledge Base evidence is available.
+
+The threshold was empirically calibrated against the current English Knowledge Base, multilingual query behavior and the configured embedding model. It is project-specific and should be re-evaluated if the corpus, chunking strategy or embedding model changes.
+
+---
+
+## ADR-14 — Managed Chart Retention
+
+Generated analytical PNG files have an explicit lifecycle managed by the Python Data Agent.
+
+The default policy retains application-managed charts for 24 hours and performs cleanup every 60 minutes.
+
+Cleanup runs once during application startup and periodically during runtime, while shutdown cancels the background task cleanly.
+
+Only files matching:
+
+    monthly_defect_rate_*.png
+
+are eligible for automatic removal.
+
+This prevents generated artifacts from accumulating indefinitely without allowing the cleanup mechanism to delete unrelated files.
+
+---
+
+## ADR-15 — Chat API Hardening and Observability
+
+The conversational API includes lightweight application-level protection and request observability appropriate to the current project scope.
+
+The Backend:
+
+- requires a valid non-empty `OPENAI_API_KEY` at startup;
+- rate-limits Chat API requests, with a default policy of 30 requests per 15-minute window;
+- assigns a request ID to each Chat API request;
+- returns the identifier through `X-Request-Id`;
+- records structured request metadata including status, latency and tools used;
+- aggregates OpenAI token usage across all orchestration rounds;
+- keeps operational token metadata internal rather than exposing it in the public Chat API response.
+
+Authentication, RBAC, distributed rate limiting and centralized observability infrastructure remain production-scale extensions rather than implemented project features.
 
 ---
 
@@ -3260,20 +3561,22 @@ These include:
 - distributed session management;
 - production secrets management;
 - enterprise identity integration;
-- centralized observability;
+- centralized log aggregation and observability platforms;
 - distributed tracing;
-- production monitoring;
+- production monitoring and alerting;
 - automated CI/CD;
 - container orchestration;
 - high availability;
 - horizontal scaling;
-- rate limiting;
+- distributed or identity-aware rate limiting;
 - enterprise audit logging;
 - production cloud deployment.
 
-Their absence does not affect the core Hybrid AI scenario demonstrated by the project.
+The current implementation nevertheless includes targeted application-level hardening appropriate to the project scope, including fail-fast OpenAI credential validation, Chat API rate limiting, controlled tool execution boundaries and protected chart access.
 
-They represent infrastructure and operational capabilities that would become relevant when evolving the prototype into a production enterprise platform.
+Their presence does not turn the project into a production enterprise platform: authentication, authorization, centralized operational infrastructure and distributed controls would still be required for that evolution.
+
+These scope boundaries do not affect the core Hybrid AI scenario demonstrated by the project.
 
 ---
 
@@ -3357,6 +3660,48 @@ Examples include:
 
 The deterministic execution model could remain in place while expanding the set of supported operations.
 
+### Data Scalability
+
+The current analytical implementation intentionally uses Pandas.
+
+For the present project scope, the Manufacturing Dataset contains approximately 2,000 rows and the prepared dataset is cached once per Data Agent process through `DatasetRepository`. At this scale, Pandas provides a simple, transparent and appropriate analytical runtime while remaining aligned with the project requirements.
+
+The current implementation therefore does not introduce an additional SQL analytical engine.
+
+If the dataset grows to hundreds of thousands or millions of rows, or if keeping the prepared dataset in memory creates significant RAM pressure, the data-access layer should be re-evaluated.
+
+A future evolution could move filtering and aggregation closer to the storage layer through:
+
+- DuckDB for analytical SQL workloads over tabular files such as CSV or Parquet;
+- SQLite for lightweight persistent relational workloads;
+- or an external database when deployment, concurrency or data volume requires a dedicated data platform.
+
+A possible evolution would be:
+
+    Current architecture
+    CSV
+      ↓
+    DatasetRepository
+      ↓
+    Prepared Pandas DataFrame
+      ↓
+    Deterministic Analysis
+
+    Larger-scale architecture
+    Persistent / columnar data
+      ↓
+    DuckDB, SQLite or external database
+      ↓
+    SQL filtering and aggregation
+      ↓
+    Smaller analytical result set
+      ↓
+    Deterministic Analysis
+
+This migration would preserve the deterministic analytical contract of the Data Agent while avoiding the requirement to load an increasingly large source dataset entirely into process memory.
+
+DuckDB and SQLite are therefore documented as scalability paths rather than implemented runtime dependencies.
+
 ---
 
 ## Persistent Analytical Artifacts
@@ -3375,18 +3720,43 @@ A future implementation could introduce:
 
 ## Observability
 
-A production environment would benefit from centralized observability across all services.
+The current Backend includes application-level structured observability for the conversational request path.
 
-Possible capabilities include:
+Each Chat API request is assigned a request identifier. The identifier is propagated through the request lifecycle and returned to the client through:
 
-- structured centralized logging;
-- metrics;
+    X-Request-Id
+
+Structured request records capture operational metadata including:
+
+- request ID;
+- HTTP status code;
+- request latency;
+- tools used during orchestration;
+- OpenAI token usage.
+
+Token usage is collected from the OpenAI Responses API and accumulated across every orchestration round, including intermediate tool-calling rounds.
+
+The tracked values are:
+
+    inputTokens
+    outputTokens
+    totalTokens
+
+These values are retained as internal observability metadata and are not exposed in the public Chat API response consumed by the React Frontend.
+
+The observability middleware also records requests that terminate before successful AI orchestration, including validation failures and rate-limited requests such as HTTP 400 and HTTP 429 responses.
+
+This provides lightweight request-level visibility without coupling the public API contract to operational telemetry.
+
+The current implementation does not include a centralized observability platform. A production evolution could export the existing structured telemetry to centralized infrastructure and extend it with:
+
+- centralized log aggregation;
+- service and business metrics;
 - distributed tracing;
-- LLM latency monitoring;
-- tool-execution metrics;
+- dashboards and alerting;
 - retrieval-quality metrics;
-- token-usage monitoring;
-- dependency health dashboards.
+- dependency health monitoring;
+- long-term latency and token-usage analysis.
 
 ---
 
@@ -3652,8 +4022,8 @@ The clean environment successfully verified:
 The final quality checks executed successfully include:
 
     Backend
-    15 test files
-    89 tests
+    18 test files
+    120 tests
     TypeScript type checking
     ESLint verification
     Production build
@@ -3663,8 +4033,11 @@ The final quality checks executed successfully include:
     Production build
 
     Python Data Agent
-    66 automated tests
+    80 automated tests
     Ruff verification
+
+    Automated Backend + Data Agent baseline
+    200 tests
 
 During clean-clone validation, the setup documentation was also improved to explicitly verify the Python interpreter version and document the ChromaDB CLI installation procedure.
 

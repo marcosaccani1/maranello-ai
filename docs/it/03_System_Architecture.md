@@ -732,9 +732,27 @@ Il client:
 - riceve risultati numerici;
 - riceve insight narrativi;
 - riceve eventuali riferimenti ai grafici generati;
-- gestisce errori di connessione e risposte non valide.
+- valida le risposte ricevute;
+- applica un timeout esplicito alle richieste HTTP;
+- gestisce errori di connessione e risposte non valide;
+- ritenta automaticamente le richieste in presenza di errori transitori.
 
-L'indisponibilità del Data Agent viene gestita dal backend come errore di dipendenza e restituita al frontend mediante una risposta HTTP controllata.
+Le chiamate HTTP verso il Data Agent utilizzano un meccanismo condiviso di resilienza basato su `AbortController`.
+
+Se una richiesta supera il timeout configurato, viene interrotta invece di rimanere indefinitamente in attesa.
+
+Il meccanismo di retry distingue inoltre tra errori transitori e non transitori:
+
+- errori di rete possono essere ritentati;
+- risposte HTTP `5xx` possono essere ritentate;
+- risposte HTTP `4xx` non vengono ritentate automaticamente;
+- tra i tentativi viene applicato un backoff controllato.
+
+Questa strategia evita sia attese indefinite sia retry inutili su richieste che il servizio ha già identificato come non valide.
+
+Il medesimo meccanismo HTTP resiliente viene riutilizzato dal Chart Client, mantenendo coerente la gestione delle comunicazioni backend-to-service.
+
+L'indisponibilità persistente del Data Agent, dopo l'applicazione della strategia di resilienza prevista, viene gestita dal backend come errore di dipendenza e restituita al frontend mediante una risposta HTTP controllata.
 
 ---
 
@@ -746,23 +764,33 @@ Il frontend non comunica direttamente con il servizio Python.
 
 Quando deve visualizzare un'immagine, utilizza il backend Node.js:
 
-```text
-Frontend
-   |
-   | GET /api/charts/:filename
-   v
-Node.js Backend
-   |
-   | GET /charts/:filename
-   v
-Python Data Agent
-```
+    Frontend
+       |
+       | GET /api/charts/:filename
+       v
+    Node.js Backend
+       |
+       | GET /charts/:filename
+       v
+    Python Data Agent
 
 Il backend recupera il file dal Data Agent e lo inoltra al frontend.
 
 Questa scelta mantiene un unico punto di accesso applicativo e impedisce al frontend di dipendere direttamente dalla topologia interna dei servizi.
 
 Il nome del file richiesto viene validato prima dell'inoltro per impedire richieste di path non consentiti.
+
+Anche la comunicazione utilizzata dal Chart Client adotta il meccanismo HTTP resiliente condiviso dal backend.
+
+Il recupero del grafico dispone quindi di:
+
+- timeout esplicito tramite `AbortController`;
+- retry per errori di rete transitori;
+- retry per risposte HTTP `5xx`;
+- assenza di retry automatico per risposte HTTP `4xx`;
+- backoff controllato tra i tentativi.
+
+In questo modo un problema temporaneo del Data Agent non provoca immediatamente il fallimento del recupero dell'immagine, mentre un'indisponibilità persistente viene comunque propagata attraverso il normale error handling del backend.
 
 ---
 
@@ -888,29 +916,46 @@ Questo riduce il rischio che una richiesta valida venga trasformata in un'analis
 
 ## 8.5 Agentic Tool Loop
 
-L'orchestrazione segue un ciclo iterativo.
+L'orchestrazione segue un ciclo iterativo controllato.
 
-```mermaid
-flowchart TD
+    User Message
+         |
+         v
+    OpenAI Responses API
+         |
+         v
+      Tool call?
+       /      \
+     No        Yes
+     |          |
+     v          v
+    Final     Check tool-round limit
+    Answer       |
+                 v
+          Execute requested tool(s)
+                 |
+                 v
+          function_call_output
+                 |
+                 +--------> OpenAI Responses API
 
-    Start["User Message"]
-    Model["OpenAI Responses API"]
-    Check{"Tool call?"}
-    Execute["Execute requested tool(s)"]
-    Results["Return function_call_output"]
-    Final["Final Answer"]
+Quando il modello richiede uno o più tool, l'AI Orchestrator esegue gli strumenti richiesti, restituisce i relativi `function_call_output` alla Responses API e consente al modello di proseguire il processo.
 
-    Start --> Model
-    Model --> Check
+Il ciclo termina quando:
 
-    Check -->|"No"| Final
-    Check -->|"Yes"| Execute
+- il modello produce una risposta finale senza ulteriori function call;
+- l'esecuzione di un tool produce un errore che interrompe il flusso;
+- viene raggiunto il limite massimo di tool round consentiti.
 
-    Execute --> Results
-    Results --> Model
-```
+L'implementazione definisce:
 
-Il processo termina solamente quando il modello produce una risposta finale priva di ulteriori function call.
+    MAX_TOOL_ROUNDS = 5
+
+Un tool round rappresenta un ciclo nel quale il modello richiede l'esecuzione di uno o più strumenti.
+
+Il limite viene verificato prima di eseguire un nuovo round di tool. Di conseguenza, al massimo cinque round possono eseguire strumenti; un'ulteriore richiesta di tool viene interrotta con un errore controllato.
+
+Questa protezione impedisce che una sequenza anomala o non terminante di function call possa generare un ciclo indefinito o un consumo incontrollato di risorse e chiamate al provider AI.
 
 ---
 
@@ -995,15 +1040,32 @@ La Knowledge Base è scritta in inglese, ma il sistema supporta query in italian
 
 ## 8.10 Controllo del ciclo agentico
 
-Per evitare esecuzioni indefinite, l'AI Orchestrator applica un limite massimo al numero di cicli di tool execution.
+Per evitare esecuzioni indefinite, l'AI Orchestrator applica un limite esplicito al numero di cicli di tool execution.
 
-Il limite costituisce una misura di sicurezza applicativa e impedisce che il modello generi una sequenza non terminante di function call.
+Il valore implementato è:
+
+    MAX_TOOL_ROUNDS = 5
+
+Il contatore viene incrementato per ogni round nel quale vengono effettivamente eseguiti uno o più tool.
+
+Prima dell'esecuzione di un nuovo round, l'orchestratore verifica che il limite non sia già stato raggiunto.
 
 Il processo può quindi terminare in uno dei seguenti modi:
 
 - risposta finale prodotta dal modello;
 - errore di uno dei tool;
-- raggiungimento del limite massimo di iterazioni.
+- raggiungimento del limite massimo di cinque tool round.
+
+Se il modello richiede ulteriori strumenti dopo i cinque round consentiti, l'orchestratore interrompe il ciclo e genera un errore controllato invece di continuare indefinitamente.
+
+Il limite rappresenta contemporaneamente:
+
+- una protezione contro loop agentici non terminanti;
+- un controllo sul consumo di risorse;
+- un limite al numero di chiamate potenzialmente generate dal processo agentico;
+- un comportamento deterministico e verificabile attraverso test automatici.
+
+La protezione non modifica il routing autonomo del modello: l'LLM continua a decidere quali tool utilizzare e in quale sequenza, ma tale autonomia opera entro un confine applicativo esplicito.
 
 ---
 
@@ -1146,11 +1208,27 @@ Il modulo RAG segue il seguente flusso:
 2. generazione dell'embedding della query;
 3. invio della ricerca a ChromaDB;
 4. similarity search sulla collection della Knowledge Base;
-5. recupero dei chunk documentali più rilevanti;
-6. recupero dei metadati associati;
-7. costruzione del contesto documentale;
-8. restituzione del risultato all'AI Decision Engine;
-9. utilizzo del contesto da parte del modello linguistico per generare la risposta finale.
+5. recupero dei candidati semanticamente più vicini;
+6. valutazione della distanza restituita dal Vector Database;
+7. esclusione dei risultati che superano la soglia massima di distanza;
+8. recupero dei metadati associati ai risultati accettati;
+9. costruzione del contesto documentale;
+10. restituzione del risultato all'AI Decision Engine;
+11. utilizzo del contesto da parte del modello linguistico per generare la risposta finale.
+
+Il retriever non considera quindi automaticamente rilevanti tutti i risultati restituiti dalla ricerca Top-K.
+
+L'implementazione applica:
+
+    maxDistance = 0.70
+
+I candidati con distanza superiore a `0.70` vengono esclusi dal contesto RAG.
+
+Anche risultati privi di una distanza valida vengono scartati, poiché non possono essere verificati rispetto al criterio di rilevanza configurato.
+
+Se nessun candidato soddisfa il requisito, il retriever può restituire un insieme vuoto invece di fornire al modello contenuto documentale semanticamente debole.
+
+Questo comportamento riduce il rischio che una query fuori dominio venga associata forzatamente ai chunk più vicini della Knowledge Base soltanto perché ChromaDB restituisce comunque una lista di nearest neighbors.
 
 ---
 
@@ -1254,7 +1332,9 @@ Il sistema restituisce il contesto documentale recuperato al modello linguistico
 
 ## 9.10 Output del RAG
 
-Il risultato del tool RAG contiene informazioni utili alla generazione della risposta, tra cui:
+Il risultato del tool RAG contiene esclusivamente i chunk che hanno superato il controllo di rilevanza configurato.
+
+Quando sono disponibili risultati pertinenti, l'output contiene informazioni utili alla generazione della risposta, tra cui:
 
 - contenuto dei chunk rilevanti;
 - identificazione della sorgente;
@@ -1264,6 +1344,12 @@ Il risultato del tool RAG contiene informazioni utili alla generazione della ris
 
 Queste informazioni permettono al modello di generare risposte grounded nella Knowledge Base.
 
+Il numero massimo di candidati recuperati non rappresenta tuttavia una garanzia che lo stesso numero di chunk venga restituito al modello.
+
+Dopo la similarity search, il filtro basato sulla distanza può ridurre il numero dei risultati fino a zero.
+
+Un risultato vuoto è quindi considerato un esito valido del retrieval quando la Knowledge Base non contiene contenuto sufficientemente rilevante rispetto alla query.
+
 ---
 
 ## 9.11 Vincoli del RAG
@@ -1271,6 +1357,14 @@ Queste informazioni permettono al modello di generare risposte grounded nella Kn
 Il modulo RAG non deve essere utilizzato come fonte per calcolare KPI o statistiche del Manufacturing Dataset.
 
 Allo stesso modo, il modello non deve inventare policy aziendali quando la documentazione disponibile non supporta una determinata affermazione.
+
+Il retriever applica inoltre una soglia massima di distanza pari a `0.70`.
+
+La soglia è stata calibrata sul corpus del progetto attraverso verifiche con query pertinenti e query chiaramente fuori dominio, includendo richieste formulate sia in inglese sia in italiano.
+
+Le verifiche hanno mostrato che le query documentali pertinenti utilizzate nel progetto rimangono entro il limite configurato, mentre query estranee al dominio possono essere escluse completamente dal retrieval.
+
+La soglia rappresenta un parametro applicativo calibrato per l'attuale Knowledge Base e non una costante universale: un'evoluzione significativa del corpus, del modello di embedding o della strategia di indicizzazione richiederebbe una nuova validazione.
 
 La separazione tra retrieval documentale e analisi quantitativa costituisce uno dei principi fondamentali dell'architettura ibrida.
 
@@ -1311,27 +1405,44 @@ Il Python Data Agent è responsabile di:
 
 ## 10.3 Architettura del Data Agent
 
-```mermaid
-flowchart LR
+Il Data Agent separa interpretazione della richiesta, preparazione del dataset, analisi, generazione dei grafici e produzione degli insight.
 
-    Request["Analysis Request"]
-    Interpreter["Question Interpreter"]
-    Loader["Dataset Loader"]
-    Cleaner["Data Cleaner"]
-    Analytics["Analytics Engine"]
-    Chart["Chart Generator"]
-    Insight["Narrative Insight"]
-    Response["Structured Response"]
+    Analysis Request
+           |
+           v
+    Question Interpreter
+           |
+           v
+    DataAnalysisService
+           |
+           v
+    DatasetRepository
+       |         |
+       | cache   | first load / explicit reload
+       v         v
+    Prepared   Dataset Loader
+    DataFrame       |
+       ^            v
+       |        Data Cleaner
+       |____________|
+           |
+           v
+    Analytics Engine
+       |         |
+       v         v
+    Chart      Narrative
+    Generator   Insight
+       |         |
+       +----+----+
+            |
+            v
+    Structured Response
 
-    Request --> Interpreter
-    Interpreter --> Loader
-    Loader --> Cleaner
-    Cleaner --> Analytics
-    Analytics --> Chart
-    Analytics --> Insight
-    Chart --> Response
-    Insight --> Response
-```
+`DatasetRepository` costituisce il boundary tra la logica analitica e il lifecycle del dataset preparato.
+
+Il repository incapsula `DataLoader` e `DataCleaner` e mantiene in memoria il DataFrame già caricato e normalizzato.
+
+Questa separazione evita che ogni richiesta analitica debba conoscere o ripetere il processo di caricamento e pulizia.
 
 ---
 
@@ -1363,9 +1474,29 @@ La risposta può contenere:
 
 ## 10.5 Data Loading
 
-Il dataset viene caricato tramite Pandas.
+Il dataset viene elaborato tramite Pandas, ma non viene riletto e ripulito a ogni richiesta `POST /api/analysis`.
 
-Ogni riga rappresenta un batch produttivo e contiene informazioni relative a:
+La gestione del lifecycle del dataset è affidata a `DatasetRepository`.
+
+Il repository utilizza una strategia di **lazy loading con cache per processo**:
+
+1. alla prima analisi viene richiesto il dataset preparato;
+2. `DatasetRepository` carica il CSV attraverso `DataLoader`;
+3. il dataset viene normalizzato attraverso `DataCleaner`;
+4. il DataFrame preparato viene conservato nella cache in memoria;
+5. le analisi successive riutilizzano il dataset già preparato senza ripetere lettura e cleaning.
+
+Questo elimina il costo di `pd.read_csv` e della successiva pulizia da ogni singola richiesta analitica.
+
+Il caricamento rimane lazy: il processo FastAPI può avviarsi senza leggere immediatamente il dataset e la preparazione avviene al primo utilizzo effettivo.
+
+Il repository espone inoltre un'operazione esplicita di `reload()` che consente di ricostruire la cache quando il dataset deve essere ricaricato.
+
+Il reload viene gestito in modo transazionale rispetto alla cache esistente: se il nuovo caricamento o cleaning fallisce, il dataset precedentemente preparato rimane disponibile invece di essere sostituito da uno stato incompleto.
+
+Il DataFrame memorizzato dal repository viene inoltre protetto rispetto a modifiche accidentali da parte dei consumer, preservando il dataset preparato tra analisi successive.
+
+Ogni riga del Manufacturing Dataset rappresenta un batch produttivo e contiene informazioni relative a:
 
 - data di produzione;
 - plant;
@@ -1383,6 +1514,10 @@ Ogni riga rappresenta un batch produttivo e contiene informazioni relative a:
 - component category;
 - inspection status;
 - operator team.
+
+Per il dataset attuale, composto da circa 2.000 record, questa strategia mantiene la semplicità di Pandas eliminando contemporaneamente il principale overhead derivante dalla rilettura del CSV per ogni richiesta.
+
+La strategia di persistenza e query per dataset di dimensioni significativamente superiori viene trattata separatamente nel capitolo dedicato alla scalabilità.
 
 ---
 
@@ -1505,6 +1640,44 @@ Quando una richiesta richiede una visualizzazione, il sistema:
 Le immagini generate vengono archiviate nella directory dedicata ai chart runtime.
 
 I file generati non fanno parte del codice sorgente e vengono esclusi dal version control.
+
+### Lifecycle e retention dei grafici
+
+Per evitare un accumulo indefinito di immagini runtime, il Data Agent implementa una strategia automatica di retention tramite `ChartCleanupService`.
+
+La configurazione predefinita utilizza:
+
+    chart_retention_hours = 24.0
+    chart_cleanup_interval_minutes = 60.0
+
+Di conseguenza, i grafici generati più vecchi di 24 ore diventano eleggibili per la rimozione e il controllo viene eseguito periodicamente ogni 60 minuti.
+
+Il lifecycle FastAPI avvia la gestione della retention insieme al servizio:
+
+1. la directory dei grafici viene resa disponibile all'avvio;
+2. viene eseguito immediatamente un primo cleanup;
+3. viene avviato un task asincrono periodico;
+4. il task attende l'intervallo configurato;
+5. il cleanup viene rieseguito in background;
+6. allo shutdown del servizio il task viene cancellato in modo controllato.
+
+Le operazioni di scansione e rimozione vengono eseguite senza bloccare direttamente l'event loop principale dell'applicazione.
+
+Il cleanup è intenzionalmente limitato ai file runtime che rispettano il pattern dei grafici generati dall'applicazione:
+
+    monthly_defect_rate_*.png
+
+In questo modo il servizio non effettua una cancellazione indiscriminata di altri file eventualmente presenti nella directory.
+
+La gestione considera inoltre condizioni operative come:
+
+- directory non ancora esistente;
+- file già rimosso tra scansione e cancellazione;
+- configurazioni di retention o intervallo non valide.
+
+I parametri di retention sono configurabili tramite le impostazioni del Data Agent e devono assumere valori positivi.
+
+Questa strategia mantiene i grafici sufficientemente a lungo per il normale utilizzo conversazionale, evitando contemporaneamente che gli artefatti runtime crescano senza limite nel filesystem.
 
 ---
 
@@ -1788,6 +1961,12 @@ Durante la progettazione e l'implementazione sono state adottate decisioni archi
 | ADR-014 | Dependency-aware error handling | Distinguere errori applicativi da indisponibilità di ChromaDB o Data Agent e restituire `503 Service Unavailable`. |
 | ADR-015 | Runtime chart files esclusi dal version control | Evitare la presenza nel repository di artefatti generati dinamicamente. |
 | ADR-016 | Environment-based configuration | Impedire l'hardcoding di API key, URL dei servizi e configurazioni sensibili. |
+| ADR-017 | Prepared dataset cache per processo | Evitare lettura e cleaning del CSV a ogni analisi mantenendo il dataset preparato in memoria con reload esplicito. |
+| ADR-018 | Bounded agentic tool loop | Limitare l'esecuzione autonoma a un massimo di cinque tool round, prevenendo loop indefiniti e consumo incontrollato di risorse. |
+| ADR-019 | Resilient inter-service HTTP | Applicare timeout, retry selettivi e backoff alle comunicazioni con il Data Agent tramite un meccanismo condiviso. |
+| ADR-020 | RAG relevance threshold | Filtrare i nearest neighbors con `maxDistance = 0.70` e consentire retrieval vuoti per query non sufficientemente pertinenti. |
+| ADR-021 | Runtime chart retention | Eliminare periodicamente i grafici runtime scaduti tramite una policy configurabile di retention e cleanup. |
+| ADR-022 | Chat API hardening and observability | Applicare fail-fast configuration, rate limiting e osservabilità strutturata con request ID, latenza, tool utilizzati e token usage. |
 
 ---
 
@@ -1844,22 +2023,79 @@ La nuova configurazione ha migliorato il retrieval di documenti inglesi a partir
 
 L'architettura di Maranello AI è stata progettata per consentire un'evoluzione progressiva.
 
-L'attuale implementazione è ottimizzata per un ambiente locale e dimostrativo, ma la separazione dei componenti consente future estensioni.
+L'attuale implementazione è dimensionata per un ambiente locale, dimostrativo e riproducibile, mentre la separazione tra frontend, orchestrazione, retrieval e analisi consente di evolvere i singoli componenti senza modificare il modello di interazione dell'utente.
 
-Possibili evoluzioni includono:
+## 14.1 Scalabilità del Data Agent
+
+Il Manufacturing Dataset utilizzato dal progetto contiene circa 2.000 record.
+
+Per questa scala, Pandas rappresenta una soluzione appropriata perché:
+
+- è coerente con i requisiti analitici del progetto;
+- permette trasformazioni e aggregazioni semplici e leggibili;
+- mantiene ridotta la complessità infrastrutturale;
+- consente test deterministici e riproducibili;
+- integra direttamente la logica di cleaning e analytics già implementata.
+
+L'ottimizzazione introdotta tramite `DatasetRepository` elimina inoltre la rilettura e il cleaning del CSV per ogni richiesta.
+
+Il dataset preparato viene caricato una volta per processo al primo utilizzo e successivamente riutilizzato dalla cache in memoria.
+
+Per il volume attuale, questa strategia evita il principale overhead della precedente implementazione senza introdurre un database aggiuntivo non necessario.
+
+## 14.2 Evoluzione per dataset di grandi dimensioni
+
+La cache Pandas non viene considerata una soluzione universale per dataset arbitrariamente grandi.
+
+Con dataset nell'ordine delle centinaia di migliaia o milioni di record, oppure quando la dimensione complessiva dei dati rende inefficiente mantenerli interamente in RAM, sarebbe opportuno spostare progressivamente filtering, aggregazioni e query verso un motore dedicato.
+
+Le principali evoluzioni considerate sono:
+
+- **DuckDB**, particolarmente adatto a workload analitici locali e query SQL su dati tabulari, CSV o formati colonnari;
+- **SQLite**, utilizzabile quando sono richieste persistenza relazionale locale e query strutturate con un footprint infrastrutturale ridotto;
+- **database o data platform esterna**, per scenari enterprise nei quali i dati provengano direttamente da sistemi produttivi, data warehouse, MES o altre sorgenti persistenti.
+
+In tale evoluzione, il Data Agent manterrebbe lo stesso ruolo architetturale.
+
+Cambierebbe principalmente il layer di accesso ai dati:
+
+    Current
+    DatasetRepository
+         |
+         v
+    Pandas DataFrame cache
+
+    Future large-scale scenario
+    Data Repository
+         |
+         v
+    DuckDB / SQLite / external datastore
+         |
+         v
+    Query and aggregation pushdown
+
+L'obiettivo sarebbe evitare il caricamento indiscriminato dell'intero dataset in memoria ed eseguire quanto più possibile filtri e aggregazioni vicino al layer di persistenza.
+
+DuckDB rappresenta una naturale opzione futura per workload analitici tabulari, mentre la scelta definitiva dipenderebbe da volume, concorrenza, persistenza richiesta e infrastruttura di produzione.
+
+Questa evoluzione è intenzionalmente documentata ma **non implementata nell'attuale versione**, poiché il dataset del progetto non presenta dimensioni tali da giustificare la complessità aggiuntiva.
+
+## 14.3 Scalabilità degli altri componenti
+
+Ulteriori evoluzioni architetturali possibili includono:
 
 - containerizzazione dei servizi;
 - deployment indipendente di frontend, backend, ChromaDB e Data Agent;
 - bilanciamento del carico tra più istanze backend;
 - persistenza delle sessioni su Redis o database;
-- autenticazione degli utenti;
+- autenticazione e autorizzazione degli utenti;
 - Role-Based Access Control;
 - supporto a più dataset;
 - supporto a più collection ChromaDB;
 - integrazione con database relazionali;
 - integrazione con sistemi ERP o MES;
 - aggiunta di nuovi tool;
-- sistemi di osservabilità e metriche;
+- sistemi centralizzati di osservabilità e metriche;
 - code asincrone per analisi particolarmente onerose.
 
 La separazione tra orchestrazione, retrieval e analisi permette di scalare i diversi componenti in modo indipendente.
@@ -1868,21 +2104,28 @@ La separazione tra orchestrazione, retrieval e analisi permette di scalare i div
 
 # 15. Sicurezza
 
-## 15.1 Gestione dei secret
+## 15.1 Gestione dei secret e fail-fast configuration
 
 Le credenziali e le configurazioni sensibili non vengono hardcodate nel codice sorgente.
 
-Le informazioni sensibili vengono caricate attraverso variabili d'ambiente, tra cui:
+Le informazioni sensibili e le principali configurazioni runtime vengono caricate attraverso variabili d'ambiente, tra cui:
 
 - OpenAI API key;
 - modello LLM;
 - embedding model;
 - URL dei servizi;
-- configurazioni applicative.
+- configurazioni applicative;
+- configurazione del rate limiting.
 
 Il file `.env` locale è escluso dal version control.
 
 Il repository contiene solamente file `.env.example` privi di credenziali reali.
+
+La variabile `OPENAI_API_KEY` è obbligatoria per il backend.
+
+L'applicazione applica una strategia **fail-fast**: se la variabile è assente, vuota o composta solamente da whitespace, la configurazione viene rifiutata durante l'avvio invece di consentire al servizio di partire in uno stato parzialmente funzionante.
+
+Questa scelta rende immediatamente visibile un errore di configurazione e impedisce che venga scoperto solamente alla prima richiesta che richiede il provider AI.
 
 ---
 
@@ -1937,18 +2180,90 @@ Questo impedisce che un errore di dipendenza venga rappresentato come un errore 
 
 ---
 
-## 15.6 Limitazioni attuali
+## 15.6 Rate limiting della Chat API
+
+L'endpoint `POST /api/chat` può generare chiamate verso servizi AI a consumo.
+
+Per ridurre il rischio di richieste eccessive, il backend applica un rate limiter dedicato alla Chat API.
+
+La configurazione predefinita è:
+
+    CHAT_RATE_LIMIT_WINDOW_MINUTES = 15
+    CHAT_RATE_LIMIT_MAX_REQUESTS = 30
+
+Questo corrisponde a un massimo di 30 richieste per finestra di 15 minuti secondo la chiave di identificazione utilizzata dal middleware.
+
+Quando il limite viene superato, la richiesta viene bloccata prima di raggiungere il Chat Service e il backend restituisce:
+
+    HTTP 429 Too Many Requests
+
+Il rate limiter utilizza gli header standard previsti dalla libreria e non abilita i legacy rate-limit headers.
+
+I valori possono essere modificati tramite configurazione d'ambiente senza intervenire sul codice applicativo.
+
+Il rate limiting rappresenta una protezione di base per l'attuale deployment dimostrativo; non sostituisce autenticazione, autorizzazione o quote per utente necessarie in un sistema enterprise multi-user.
+
+---
+
+## 15.7 Osservabilità strutturata della Chat API
+
+Il backend registra informazioni strutturate relative all'elaborazione delle richieste di chat.
+
+A ogni richiesta viene associato un request identifier che permette di correlare il ciclo applicativo.
+
+Lo stesso identificativo viene restituito al client attraverso l'header:
+
+    X-Request-Id
+
+I dati di osservabilità includono almeno:
+
+- request identifier;
+- codice HTTP della risposta;
+- latenza della richiesta;
+- tool utilizzati dall'orchestratore;
+- utilizzo dei token OpenAI.
+
+L'AI Orchestrator raccoglie il token usage restituito dalla Responses API e lo aggrega attraverso tutti i round necessari a completare la richiesta.
+
+Le metriche considerate sono:
+
+- input tokens;
+- output tokens;
+- total tokens.
+
+L'aggregazione comprende quindi anche eventuali round intermedi di function calling e non solamente la risposta finale.
+
+Le informazioni di token usage vengono utilizzate internamente per l'osservabilità e **non vengono aggiunte al contratto pubblico della Chat API** restituito al frontend.
+
+Anche richieste rifiutate durante la validazione o dal rate limiter mantengono il tracciamento del request identifier e delle informazioni applicabili al relativo ciclo HTTP.
+
+La strategia mantiene separati:
+
+    Public API response
+        -> user-facing conversational result
+
+    Internal observability
+        -> request metadata, tools, latency and token usage
+
+Questo consente di migliorare tracciabilità e diagnosi senza modificare il payload applicativo utilizzato dal frontend.
+
+---
+
+## 15.8 Limitazioni attuali
 
 L'implementazione dimostrativa non include ancora:
 
 - autenticazione;
 - autorizzazione;
+- quote persistenti per identità autenticata;
 - crittografia applicativa aggiuntiva;
 - persistenza distribuita delle sessioni;
 - gestione centralizzata dei secret;
-- rate limiting.
+- piattaforma esterna centralizzata per log, metriche e tracing.
 
-Queste caratteristiche rappresentano possibili evoluzioni per un deployment enterprise reale.
+Il rate limiting e l'osservabilità strutturata costituiscono il baseline implementato nel backend attuale.
+
+In un deployment enterprise, questi controlli dovrebbero essere integrati con identità degli utenti, autorizzazione, storage centralizzato dei log, metriche operative, alerting e distributed tracing.
 
 ---
 

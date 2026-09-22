@@ -420,8 +420,8 @@ La parte maggiormente automatizzata riguarda il Backend Node.js.
 
 La suite finale comprende:
 
-    15 test files
-    86 automated tests
+    18 test files
+    120 automated tests
 
 I test verificano moduli e comportamenti critici dell'orchestrazione, riducendo il rischio di regressioni.
 
@@ -1243,8 +1243,8 @@ La suite automatizzata rappresenta quindi uno dei principali meccanismi di Quali
 
 La suite finale del Backend comprende:
 
-    Test files: 15
-    Automated tests: 86
+    Test files: 18
+    Automated tests: 120
 
 L'esecuzione finale ha prodotto:
 
@@ -1549,7 +1549,7 @@ Questa caratteristica è particolarmente importante per RAG e analisi numeriche.
 
 ## 6.17 Valutazione complessiva dei test Backend
 
-Il superamento dei 86 test automatici, insieme a type checking, linting e build, fornisce la principale evidenza automatizzata di stabilità della componente Node.js.
+Il superamento dei 120 test automatici distribuiti in 18 test file, insieme a type checking, linting e build, fornisce la principale evidenza automatizzata di stabilità della componente Node.js.
 
 Le verifiche Full-Stack vengono utilizzate successivamente per validare le integrazioni che non possono essere completamente dimostrate attraverso test isolati.
 
@@ -3570,11 +3570,21 @@ Risultato finale:
 
 Suite automatizzata:
 
-    Test files: 15
-    Tests:      86
+    Test files: 18
+    Tests:      120
     Result:     PASS
 
 Non sono presenti test falliti nella suite finale utilizzata per la validazione.
+
+La suite Backend comprende anche i test introdotti durante il ciclo di hardening successivo alla revisione tecnica, relativi a:
+
+- limite massimo dei round di function calling;
+- timeout, retry e backoff delle chiamate HTTP inter-service;
+- filtro di rilevanza del retrieval RAG;
+- configurazione fail-fast della chiave OpenAI;
+- rate limiting della Chat API;
+- osservabilità strutturata;
+- aggregazione del token usage attraverso i diversi round dell'orchestrazione.
 
 ---
 
@@ -3599,7 +3609,19 @@ Non viene dichiarata una suite automatizzata di unit test React quando non prese
 
 ## 13.4 Python Data Agent
 
-Le verifiche hanno confermato il corretto comportamento delle funzionalità principali.
+Il Python Data Agent dispone di una suite automatizzata dedicata.
+
+Risultato finale verificato:
+
+    Tests:      80
+    Result:     PASS
+
+Il controllo statico del codice Python è stato inoltre eseguito tramite Ruff:
+
+    ruff check app tests
+    Result: PASS
+
+Le verifiche automatiche coprono sia il comportamento analitico originario sia i miglioramenti introdotti durante il ciclo di hardening.
 
 | Area | Esito |
 |------|-------|
@@ -3613,10 +3635,116 @@ Le verifiche hanno confermato il corretto comportamento delle funzionalità prin
 | Unsupported combination handling | PASS |
 | Chart generation | PASS |
 | Health endpoint | PASS |
+| DatasetRepository lazy loading | PASS |
+| Dataset cache reuse | PASS |
+| Explicit dataset reload | PASS |
+| Failed reload preserves existing cache | PASS |
+| Cached DataFrame protection | PASS |
+| Chart retention | PASS |
+| Startup chart cleanup | PASS |
+| Periodic chart cleanup lifecycle | PASS |
+| Cleanup limited to managed PNG pattern | PASS |
+
+### DatasetRepository
+
+I test verificano che il Manufacturing Dataset non venga più letto e pulito a ogni richiesta analitica.
+
+In particolare viene verificato che:
+
+- il primo accesso inizializzi la cache;
+- le analisi successive riutilizzino il dataset preparato;
+- il caricamento e il cleaning non vengano ripetuti inutilmente;
+- `reload()` ricostruisca esplicitamente la cache;
+- un reload fallito non distrugga il dataset precedentemente disponibile;
+- il DataFrame memorizzato nella cache sia protetto da modifiche accidentali effettuate dai consumer.
+
+Questi test verificano direttamente l'ottimizzazione introdotta nel lifecycle del dataset senza modificare i risultati analitici attesi.
+
+### ChartCleanupService
+
+La suite verifica inoltre il lifecycle dei grafici runtime.
+
+Sono coperti:
+
+- rimozione dei grafici oltre il periodo di retention;
+- conservazione dei grafici ancora validi;
+- gestione sicura di una directory non presente;
+- limitazione del cleanup ai file `monthly_defect_rate_*.png`;
+- cleanup iniziale durante l'avvio dell'applicazione;
+- avvio del task periodico;
+- cancellazione controllata del task durante lo shutdown.
+
+La configurazione predefinita verificata dall'implementazione è:
+
+    chart_retention_hours = 24.0
+    chart_cleanup_interval_minutes = 60.0
+
+Durante l'esecuzione finale della suite è stato inoltre osservato un singolo `StarletteDeprecationWarning` proveniente dalla combinazione delle dipendenze FastAPI/Starlette TestClient.
+
+Il warning non rappresenta un test fallito e non modifica l'esito della suite:
+
+    80 passed
 
 ---
 
-## 13.5 KPI di riferimento
+## 13.5 Baseline automatizzata complessiva
+
+La baseline finale verificata delle suite Backend e Python Data Agent è:
+
+| Componente | Test superati |
+|------------|--------------:|
+| Node.js Backend | 120 |
+| Python Data Agent | 80 |
+| **Totale** | **200** |
+
+Il risultato complessivo è quindi:
+
+    Automated tests: 200
+    Failed tests:      0
+    Result:          PASS
+
+I 200 test automatizzati coprono congiuntamente:
+
+- orchestrazione AI;
+- function calling;
+- limite massimo dei tool round;
+- conversation state;
+- Chat API;
+- rate limiting;
+- structured observability;
+- token usage multi-round;
+- configurazione fail-fast;
+- RAG retrieval e relevance filtering;
+- Data Agent client;
+- Chart client;
+- timeout, retry e backoff HTTP;
+- dataset loading e cleaning;
+- DatasetRepository e caching;
+- analisi deterministiche;
+- KPI e aggregazioni;
+- generazione dei grafici;
+- retention dei grafici;
+- lifecycle FastAPI.
+
+Questa baseline viene affiancata dai controlli statici e di build previsti per i diversi componenti.
+
+Per il Backend:
+
+    npm run typecheck
+    npm run lint
+    npm test
+    npm run build
+
+Per il Data Agent:
+
+    ruff check app tests
+    pytest
+
+Tutti i controlli sopra indicati risultano superati nella baseline verificata corrente.
+
+---
+
+## 13.6 KPI di riferimento
 
 I KPI finali utilizzati come riferimento sono:
 
@@ -3635,7 +3763,7 @@ Questi valori permettono di verificare la stabilità delle elaborazioni determin
 
 ---
 
-## 13.6 Pattern analitici verificati
+## 13.7 Pattern analitici verificati
 
 I pattern principali osservati includono:
 
@@ -3652,44 +3780,176 @@ I risultati sono coerenti con le relazioni sintetiche incorporate intenzionalmen
 
 ---
 
-## 13.7 RAG
+## 13.8 RAG
 
-Risultato finale:
+Il sottosistema RAG è stato verificato sia a livello automatico sia attraverso query reali contro la Knowledge Base indicizzata in ChromaDB.
+
+Le verifiche comprendono:
 
 | Verifica | Esito |
 |----------|-------|
-| Knowledge Base ingestion | PASS |
-| 5 documents indexed | PASS |
-| 149 chunks available | PASS |
-| English retrieval | PASS |
-| Italian cross-language retrieval | PASS |
-| Quality policy retrieval | PASS |
-| Supplier procedure retrieval | PASS |
-| Source attribution | PASS |
-| ChromaDB failure handling | PASS |
+| Retrieval di contenuti pertinenti | PASS |
+| Preservazione di source e section metadata | PASS |
+| Query in inglese | PASS |
+| Query in italiano | PASS |
+| Relevance filtering tramite distanza | PASS |
+| Esclusione dei risultati oltre soglia | PASS |
+| Esclusione di distanze mancanti o non valide | PASS |
+| Nessun risultato quando nessun chunk è sufficientemente pertinente | PASS |
+| Validazione della configurazione `maxDistance` | PASS |
+
+La configurazione corrente utilizza:
+
+    maxDistance = 0.70
+
+Il `RetrieverService` filtra i candidati restituiti da ChromaDB prima che vengano utilizzati come grounding per la risposta.
+
+Sono accettati i risultati con distanza:
+
+    distance <= 0.70
+
+mentre vengono esclusi:
+
+- risultati con distanza superiore alla soglia;
+- risultati senza distanza;
+- risultati con distanza non valida.
+
+È inoltre verificato il comportamento sul boundary:
+
+    distance == 0.70
+
+che viene considerato valido.
+
+Il retriever può quindi restituire una lista vuota quando nessun candidato soddisfa il criterio di rilevanza.
+
+Questo comportamento è intenzionale e impedisce al sistema di utilizzare automaticamente il nearest neighbor disponibile quando il risultato è semanticamente troppo debole.
+
+### Calibrazione empirica
+
+Oltre ai test unitari, la soglia è stata verificata sul corpus corrente utilizzando query appartenenti a categorie differenti:
+
+- query pertinenti in inglese;
+- query pertinenti in italiano;
+- query borderline;
+- query chiaramente estranee al dominio.
+
+Le query pertinenti relative, ad esempio, a:
+
+- critical defect rate;
+- production escalation;
+- supplier critical thresholds;
+
+hanno mantenuto risultati utilizzabili.
+
+Query estranee al dominio, relative ad argomenti come:
+
+- ricette;
+- calcio;
+- fotosintesi;
+- meteo;
+
+non hanno prodotto chunk accettati con la soglia corrente.
+
+La calibrazione conferma il comportamento desiderato per il corpus e l'embedding model attuali.
+
+La soglia `0.70` non viene considerata universale: modifiche significative al corpus, al chunking o all'embedding model richiederebbero una nuova valutazione.
+
+### Obiettivo del test
+
+Il criterio di successo non è semplicemente:
+
+> ChromaDB restituisce sempre dei risultati.
+
+Il comportamento corretto è invece:
+
+> ChromaDB restituisce candidati e il RetrieverService conserva soltanto quelli sufficientemente pertinenti.
+
+Questo rende il test coerente con l'obiettivo di ridurre grounding documentale debole o fuori dominio.
 
 ---
 
-## 13.8 Orchestrazione
+## 13.9 Orchestrazione
 
-Risultato finale:
+La suite Backend verifica il comportamento dell'AI Orchestrator e il routing autonomo basato sul native function calling del provider.
 
-| Scenario | Esito |
+Le verifiche comprendono:
+
+| Verifica | Esito |
 |----------|-------|
-| Direct conversational response | PASS |
-| RAG routing | PASS |
-| Data Agent routing | PASS |
-| Hybrid routing | PASS |
-| Multiple tool usage | PASS |
-| Function output handling | PASS |
+| Direct response | PASS |
+| RAG tool execution | PASS |
+| Data Agent tool execution | PASS |
+| Multiple tool execution | PASS |
+| Function-call output propagation | PASS |
+| Final answer synthesis | PASS |
 | Conversation continuity | PASS |
-| Italian response | PASS |
-| English response | PASS |
-| Scope preservation | PASS |
+| Tool usage tracking | PASS |
+| Maximum tool rounds enforcement | PASS |
+| Multi-round token usage aggregation | PASS |
+
+### Limite massimo dei tool round
+
+L'orchestrazione agentica consente al modello di richiedere più round di function calling quando necessari.
+
+Per impedire loop indefiniti o un consumo incontrollato di risorse è stato introdotto:
+
+    MAX_TOOL_ROUNDS = 5
+
+Il test dedicato simula un modello che continua a richiedere tool anche dopo aver raggiunto il limite.
+
+Il comportamento verificato è:
+
+    Tool executions:        5
+    Responses API calls:    6
+    Further tool execution: blocked
+    Result: controlled error
+
+La sesta risposta del provider può quindi essere ricevuta per determinare che il modello sta ancora richiedendo un tool, ma il relativo tool non viene eseguito.
+
+L'orchestratore termina il ciclo con un errore controllato:
+
+    Maximum tool-calling rounds exceeded (5).
+
+Questa verifica garantisce che il loop agentico rimanga bounded senza sostituire il routing autonomo dell'LLM con logica deterministica applicativa.
+
+### Token usage multi-round
+
+L'orchestratore raccoglie inoltre il token usage restituito dal provider durante ogni round della Responses API.
+
+Il test verifica che i valori non vengano limitati alla sola risposta finale, ma siano accumulati attraverso l'intera orchestrazione.
+
+Scenario verificato:
+
+    Round 1:
+      input_tokens  = 100
+      output_tokens = 20
+
+    Round 2:
+      input_tokens  = 200
+      output_tokens = 30
+
+Risultato aggregato:
+
+    inputTokens  = 300
+    outputTokens = 50
+    totalTokens  = 350
+
+La suite verifica inoltre che l'assenza del campo `usage` in una risposta non provochi un errore e venga gestita con incrementi pari a zero.
+
+Il token usage aggregato viene utilizzato per l'osservabilità interna del Backend e non modifica il contratto JSON pubblico di `POST /api/chat`.
+
+### Obiettivo delle verifiche
+
+Questi test verificano contemporaneamente due proprietà dell'orchestrazione:
+
+1. **controllo operativo**, attraverso il limite massimo dei round;
+2. **misurabilità**, attraverso l'aggregazione del consumo di token dell'intera esecuzione.
+
+Il modello continua a decidere autonomamente quali tool utilizzare, mentre il Backend applica limiti e telemetria intorno al processo agentico.
 
 ---
 
-## 13.9 Full-Stack
+## 13.10 Full-Stack
 
 Le integrazioni principali risultano:
 
@@ -3710,25 +3970,94 @@ Le integrazioni principali risultano:
 
 ---
 
-## 13.10 Resilienza
+## 13.11 Resilienza
 
-Sono state verificate due dipendenze critiche.
+Le verifiche di resilienza coprono sia l'indisponibilità delle dipendenze applicative sia il comportamento delle comunicazioni HTTP inter-service.
 
-### Data Agent unavailable
+| Verifica | Esito |
+|----------|-------|
+| Data Agent non disponibile | PASS |
+| ChromaDB non disponibile | PASS |
+| HTTP request success senza retry | PASS |
+| Retry su HTTP 5xx | PASS |
+| Retry su errore di rete | PASS |
+| Stop dopo esaurimento dei tentativi | PASS |
+| Nessun retry su HTTP 4xx | PASS |
+| Timeout tramite AbortController | PASS |
+| Retry dopo timeout | PASS |
+| Backoff tra tentativi | PASS |
+| Validazione della configurazione retry | PASS |
+| DataAgentClient con HTTP resiliente | PASS |
+| ChartClient con HTTP resiliente | PASS |
+| Chart filename validation | PASS |
 
-    Result: PASS
-    HTTP: 503
+### Resilienza delle chiamate inter-service
 
-### ChromaDB unavailable
+`DataAgentClient` e `ChartClient` utilizzano un meccanismo HTTP condiviso implementato tramite `fetchWithRetry`.
 
-    Result: PASS
-    HTTP: 503
+L'obiettivo dei test è distinguere correttamente tra errori potenzialmente transitori e condizioni che non devono essere ritentate automaticamente.
 
-In entrambi i casi il sistema adotta un comportamento fail-safe e non genera informazioni sostitutive non verificabili.
+Sono considerate ritentabili:
+
+- failure di rete;
+- timeout;
+- risposte HTTP `5xx`.
+
+Le risposte HTTP `4xx` non vengono invece ritentate, perché rappresentano normalmente errori di richiesta o condizioni applicative che un nuovo tentativo identico non risolverebbe.
+
+### Timeout
+
+Ogni tentativo HTTP è protetto tramite `AbortController`.
+
+La suite verifica che una richiesta che supera il timeout venga interrotta e trattata come failure transitoria secondo la policy di retry configurata.
+
+Questo impedisce a una dipendenza non responsiva di mantenere indefinitamente aperta la richiesta del Backend.
+
+### Retry e backoff
+
+I test verificano che:
+
+- una richiesta riuscita termini immediatamente;
+- un errore `5xx` possa essere seguito da un nuovo tentativo;
+- un errore di rete possa essere ritentato;
+- un timeout possa essere ritentato;
+- tra i tentativi venga applicato il backoff previsto;
+- al termine dei tentativi disponibili l'errore venga propagato in modo controllato;
+- una risposta `4xx` non provochi retry non necessari.
+
+Viene inoltre verificata la validazione dei parametri utilizzati dal meccanismo condiviso, in modo da impedire configurazioni non valide.
+
+### Client applicativi
+
+I test di `DataAgentClient` verificano che il client mantenga il proprio contratto applicativo utilizzando il nuovo layer resiliente.
+
+I test di `ChartClient` verificano analogamente:
+
+- utilizzo della richiesta resiliente;
+- propagazione controllata delle failure;
+- mantenimento della validazione del filename;
+- protezione dalle richieste verso nomi di file non sicuri.
+
+### Failure delle dipendenze
+
+Le verifiche già presenti per l'indisponibilità dei servizi rimangono parte della baseline.
+
+In particolare sono stati verificati scenari nei quali:
+
+- il Python Data Agent non è disponibile;
+- ChromaDB non è disponibile.
+
+In entrambi i casi il Backend deve produrre un errore controllato anziché fallire in modo non gestito.
+
+### Obiettivo complessivo
+
+La strategia non garantisce che una dipendenza esterna sia sempre disponibile.
+
+Garantisce invece che le failure transitorie vengano gestite entro limiti definiti e che gli errori non recuperabili vengano propagati senza retry indiscriminati o attese indefinite.
 
 ---
 
-## 13.11 Stato dei difetti bloccanti
+## 13.12 Stato dei difetti bloccanti
 
 Al termine della QA documentata non risultano difetti bloccanti noti relativi ai principali scenari richiesti dal progetto.
 
@@ -3736,7 +4065,7 @@ Eventuali limitazioni della versione corrente vengono documentate separatamente 
 
 ---
 
-## 13.12 Valutazione complessiva
+## 13.13 Valutazione complessiva
 
 Il risultato complessivo delle attività eseguite è:
 
@@ -3969,21 +4298,95 @@ Le eccezioni applicative vengono gestite centralmente dal Backend.
 
 ## 14.13 Fail-safe behaviour
 
-Per le informazioni aziendali e numeriche viene adottato un principio di fail-safe behaviour.
+Il Backend applica controlli fail-safe sia durante la configurazione iniziale sia durante l'accesso alla Chat API.
 
-Se il Data Agent non è disponibile:
+Le verifiche comprendono:
 
-    return controlled error
+| Verifica | Esito |
+|----------|-------|
+| `OPENAI_API_KEY` presente | PASS |
+| Chiave mancante rifiutata | PASS |
+| Chiave vuota rifiutata | PASS |
+| Chiave contenente solo whitespace rifiutata | PASS |
+| Chat rate limiting | PASS |
+| Risposta HTTP `429` al superamento del limite | PASS |
+| Blocco prima dell'invocazione del servizio AI | PASS |
+| Risposta di errore controllata | PASS |
 
-Se la Knowledge Base non è disponibile:
+### Configurazione fail-fast
 
-    return controlled error
+`OPENAI_API_KEY` è una configurazione obbligatoria del Backend.
 
-Il sistema non deve:
+La suite verifica che il caricamento della configurazione fallisca immediatamente quando la variabile:
 
-    fabricate replacement information
+- non è definita;
+- è una stringa vuota;
+- contiene esclusivamente whitespace.
 
-Questa caratteristica rappresenta sia una misura di resilienza sia una protezione contro risposte AI non grounded.
+Il comportamento desiderato è:
+
+    invalid configuration
+            ↓
+    startup/configuration failure
+            ↓
+    no partially configured AI service
+
+Questo evita di avviare un Backend apparentemente funzionante che fallirebbe soltanto al momento della prima richiesta verso il provider.
+
+Il valore della chiave viene normalizzato tramite trimming prima della validazione.
+
+### Rate limiting della Chat API
+
+`POST /api/chat` utilizza un rate limiter applicato prima dell'esecuzione del servizio AI.
+
+La configurazione predefinita è:
+
+    CHAT_RATE_LIMIT_WINDOW_MINUTES = 15
+    CHAT_RATE_LIMIT_MAX_REQUESTS   = 30
+
+Al superamento del limite il Backend restituisce:
+
+    HTTP 429
+
+con una risposta JSON controllata che invita il client a riprovare successivamente.
+
+### Verifica dell'ordine di esecuzione
+
+Il test di integrazione utilizza un limite ridotto e deterministico per verificare il comportamento senza effettuare un numero elevato di richieste.
+
+Scenario verificato:
+
+    Request 1 → HTTP 200
+    Request 2 → HTTP 200
+    Request 3 → HTTP 429
+
+La verifica non si limita allo status code.
+
+Viene controllato anche che il servizio Chat sia stato invocato soltanto per le prime due richieste.
+
+Di conseguenza:
+
+    rate limit exceeded
+            ↓
+    request blocked
+            ↓
+    ChatService not invoked
+            ↓
+    paid AI execution avoided
+
+Questo comportamento riduce il rischio di abuso accidentale o intenzionale dell'endpoint che può generare consumo presso il provider AI.
+
+### Ambito del controllo
+
+Il rate limiting costituisce una protezione applicativa di base e non viene rappresentato come sostituto di un sistema completo di autenticazione e autorizzazione.
+
+Nella versione corrente:
+
+- il rate limiting è implementato e testato;
+- l'autenticazione utente non è implementata;
+- l'autorizzazione/RBAC non è implementata.
+
+Identity management, autenticazione enterprise e autorizzazione rimangono evoluzioni future per un eventuale deployment production-grade.
 
 ---
 
@@ -4360,19 +4763,105 @@ L'assenza di containerizzazione non impedisce il soddisfacimento dei requisiti f
 
 ## 15.16 Monitoring e observability
 
-La versione corrente utilizza logging applicativo e health endpoint, ma non implementa una piattaforma completa di observability.
+La versione corrente implementa un livello applicativo di structured observability per la Chat API.
 
-Possibili evoluzioni includono:
+Le verifiche automatiche coprono:
+
+| Verifica | Esito |
+|----------|-------|
+| Generazione del request ID | PASS |
+| Header `X-Request-Id` nella risposta | PASS |
+| Structured logging della richiesta | PASS |
+| Registrazione dello status code | PASS |
+| Registrazione della latenza | PASS |
+| Registrazione dei tool utilizzati | PASS |
+| Registrazione del token usage | PASS |
+| Aggregazione dei token su più round OpenAI | PASS |
+| Osservabilità delle risposte `400` | PASS |
+| Osservabilità delle risposte `429` | PASS |
+| Token usage non esposto nel JSON pubblico | PASS |
+
+### Request correlation
+
+Ogni richiesta alla Chat API riceve un identificativo utilizzabile per correlare la richiesta con le relative informazioni di osservabilità.
+
+Il request ID viene inoltre restituito al client attraverso:
+
+    X-Request-Id
+
+Questo permette di associare una risposta HTTP alla relativa traccia applicativa senza modificare il body pubblico dell'API.
+
+### Informazioni registrate
+
+L'observability middleware registra in forma strutturata almeno:
+
+- request ID;
+- status code;
+- latenza della richiesta;
+- tool utilizzati;
+- token usage dell'orchestrazione.
+
+Le verifiche di integrazione confermano che il meccanismo viene applicato anche alle richieste che terminano con errori controllati, inclusi:
+
+    HTTP 400
+    HTTP 429
+
+In questo modo l'osservabilità non è limitata ai soli flussi conclusi con successo.
+
+### Token usage
+
+Il token usage viene raccolto dall'AI Orchestrator e aggregato attraverso tutti i round della Responses API appartenenti alla stessa orchestrazione.
+
+Le metriche interne comprendono:
+
+    inputTokens
+    outputTokens
+    totalTokens
+
+Il dato aggregato viene propagato internamente fino al layer di osservabilità.
+
+Non viene invece aggiunto alla risposta JSON pubblica di `POST /api/chat`.
+
+Questa scelta mantiene stabile il contratto dell'API e separa le informazioni operative interne dai dati necessari al Frontend.
+
+### Stato corrente
+
+La versione corrente dispone quindi di:
+
+- request correlation;
+- structured application logging;
+- latency tracking;
+- tool usage tracking;
+- token usage tracking;
+- osservabilità delle principali risposte HTTP controllate.
+
+Non viene tuttavia dichiarata la presenza di una piattaforma centralizzata di monitoring.
+
+Non sono implementati nella versione corrente:
+
+- distributed tracing;
+- metric storage persistente;
+- dashboard centralizzate;
+- alerting;
+- log aggregation esterna;
+- APM;
+- persistenza storica delle metriche di token usage.
+
+Questi elementi rappresentano possibili evoluzioni production-grade.
+
+### Evoluzione futura
+
+Un deployment enterprise potrebbe integrare l'attuale instrumentation applicativa con tecnologie dedicate a:
 
 - centralized logging;
 - metrics collection;
+- distributed tracing;
 - dashboards;
 - alerting;
-- distributed tracing;
-- token usage monitoring;
-- LLM latency monitoring;
-- tool failure metrics;
-- retrieval quality metrics.
+- cost monitoring;
+- SLO e SLA monitoring.
+
+L'instrumentation già presente costituisce una base per tale evoluzione, ma non viene rappresentata come equivalente a una piattaforma completa di observability.
 
 ---
 
@@ -4428,13 +4917,52 @@ La versione corrente privilegia sicurezza, testabilità e prevedibilità.
 | Authorization | Non implementata | RBAC |
 | Chart storage | Local | Managed object storage |
 | Backend scaling | Single local instance | Horizontal scaling |
-| Data processing | Local CSV/Pandas | Enterprise analytical platform |
+| Data processing | Local CSV/Pandas con prepared dataset cache per processo | DuckDB, SQLite/direct SQL o piattaforma analitica esterna |
 | Vector DB | Local ChromaDB | Managed/distributed vector store |
 | AI evaluation | Manual + functional | Automated evaluation framework |
 | Security testing | Basic controls | Formal security assessment |
 | CI/CD | Non implementata | Automated delivery pipeline |
 | Containerization | Non richiesta | Docker-based deployment |
-| Observability | Logging + health | Centralized observability |
+| Observability | Structured request logging, request correlation, latency, tool usage e token usage + health | Centralized logging, metrics, tracing, dashboard e alerting |
+
+### Valutazione della scalabilità del Data Agent
+
+La versione corrente utilizza Pandas perché è coerente con i requisiti del progetto e con la dimensione del dataset utilizzato, pari a circa 2.000 record.
+
+Il precedente caricamento e cleaning del CSV a ogni richiesta è stato eliminato attraverso `DatasetRepository`.
+
+Il repository:
+
+- carica e prepara il dataset alla prima analisi;
+- mantiene in memoria il DataFrame preparato per il processo corrente;
+- riutilizza il dataset nelle analisi successive;
+- permette un reload esplicito;
+- preserva la cache precedente se un reload fallisce;
+- protegge lo stato cached dalle modifiche effettuate durante le singole analisi.
+
+Questa soluzione elimina il costo ripetuto di `pd.read_csv` e della pipeline di cleaning per ogni richiesta senza introdurre complessità infrastrutturale non necessaria per il dataset corrente.
+
+La cache non viene tuttavia considerata una soluzione universale per dataset di dimensioni molto superiori.
+
+Con dataset nell'ordine delle centinaia di migliaia o milioni di righe, oppure quando il mantenimento dell'intero DataFrame in memoria genera pressione sulla RAM, il percorso evolutivo previsto consiste nello spostare progressivamente filtering, aggregazioni e query verso un motore dedicato.
+
+Le alternative valutate sono:
+
+- **DuckDB**, particolarmente adatto a workload analitici locali e query SQL su dati tabulari;
+- **SQLite/direct SQL**, possibile soluzione per persistenza locale e interrogazioni strutturate;
+- una piattaforma analitica o database esterno per scenari distribuiti o di scala superiore.
+
+DuckDB e SQLite non sono implementati nella versione corrente.
+
+La scelta di mantenere Pandas non deriva quindi dall'assunzione che il modello in-memory sia adatto a qualsiasi volume di dati, ma dal rapporto tra:
+
+- requisiti della consegna;
+- dimensione effettiva del dataset;
+- semplicità operativa;
+- testabilità;
+- costi infrastrutturali.
+
+La migrazione verso un query engine dedicato diventa appropriata quando volume, concorrenza o consumo di memoria rendono inefficiente il modello Pandas in-memory.
 
 ---
 
@@ -4588,25 +5116,58 @@ L'approccio deterministico implementato soddisfa il ruolo richiesto al component
 
 ## 16.10 Testing
 
+La baseline finale di verifica automatizzata comprende:
+
 | Criterio | Stato |
 |----------|-------|
 | Backend automated tests | PASS |
-| 86 Backend tests superati | PASS |
+| 18 Backend test files | PASS |
+| 120 Backend tests superati | PASS |
+| Python Data Agent automated tests | PASS |
+| 80 Data Agent tests superati | PASS |
+| 200 automated tests complessivi | PASS |
 | TypeScript type check | PASS |
 | Backend lint | PASS |
 | Backend build | PASS |
+| Data Agent Ruff check | PASS |
 | Frontend lint | PASS |
 | Frontend build | PASS |
-| Data Agent verification | PASS |
 | RAG verification | PASS |
 | Orchestration verification | PASS |
 | Full-Stack verification | PASS |
 | Manual QA scenarios | PASS |
 | Resilience verification | PASS |
 
+La baseline automatizzata verificata è quindi:
+
+    Backend:     120 passed
+    Data Agent:   80 passed
+    ----------------------
+    Total:       200 passed
+
+Per il Backend risultano inoltre superati:
+
+    npm run typecheck
+    npm run lint
+    npm test
+    npm run build
+
+Per il Python Data Agent risultano superati:
+
+    ruff check app tests
+    pytest
+
+La suite Data Agent ha prodotto un singolo `StarletteDeprecationWarning` proveniente dalle dipendenze FastAPI/Starlette TestClient.
+
+Il warning non rappresenta un test fallito e non modifica l'esito della baseline.
+
+Le verifiche Frontend riportate in questa sezione si riferiscono alla baseline Full-Stack già validata; il ciclo di hardening successivo al feedback tecnico non ha richiesto modifiche al codice Frontend.
+
 ---
 
 ## 16.11 Security baseline
+
+La baseline di sicurezza della versione corrente comprende controlli relativi a gestione dei segreti, validazione degli input, protezione delle risorse, configurazione fail-fast e limitazione dell'accesso alla Chat API.
 
 | Criterio | Stato |
 |----------|-------|
@@ -4614,11 +5175,71 @@ L'approccio deterministico implementato soddisfa il ruolo richiesto al component
 | `.env` escluso dal versionamento | PASS |
 | `.env.example` disponibile | PASS |
 | Provider key non esposta al Frontend | PASS |
+| `OPENAI_API_KEY` obbligatoria | PASS |
+| Missing/empty/whitespace API key rifiutata | PASS |
 | Input validation | PASS |
 | Chart filename validation | PASS |
 | Path traversal protection | PASS |
 | Controlled dependency failures | PASS |
 | Arbitrary LLM-generated Python execution evitata | PASS |
+| Chat API rate limiting | PASS |
+| Default limit `30 requests / 15 minutes` | PASS |
+| HTTP `429` al superamento del limite | PASS |
+| Rate limiter eseguito prima del servizio AI | PASS |
+| Request ID generation | PASS |
+| `X-Request-Id` response header | PASS |
+
+### Fail-fast configuration
+
+La configurazione del provider AI viene validata prima dell'utilizzo del servizio.
+
+Il Backend non considera valida una `OPENAI_API_KEY`:
+
+- assente;
+- vuota;
+- composta esclusivamente da whitespace.
+
+Questo evita l'avvio di una configurazione AI incompleta che fallirebbe soltanto durante una richiesta utente.
+
+### Protezione della Chat API
+
+La Chat API applica un rate limiter con configurazione predefinita:
+
+    CHAT_RATE_LIMIT_WINDOW_MINUTES = 15
+    CHAT_RATE_LIMIT_MAX_REQUESTS   = 30
+
+Il superamento del limite produce:
+
+    HTTP 429
+
+Il test di integrazione verifica inoltre che una richiesta bloccata dal limiter non raggiunga il `ChatService`.
+
+Questo controllo è particolarmente rilevante perché impedisce che una richiesta già rifiutata generi inutilmente una chiamata verso il provider AI.
+
+### Request correlation
+
+Ogni richiesta alla Chat API viene associata a un request ID e la risposta include:
+
+    X-Request-Id
+
+Il request ID supporta la correlazione tra risposta HTTP e informazioni applicative registrate dal layer di osservabilità.
+
+### Limiti della baseline
+
+La baseline implementata non viene rappresentata come un sistema completo di identity and access management.
+
+Nella versione corrente:
+
+| Controllo | Stato |
+|-----------|-------|
+| Rate limiting | Implementato |
+| Authentication | Non implementata |
+| Authorization / RBAC | Non implementata |
+| Enterprise identity provider | Non implementato |
+
+Authentication, authorization e identity management rimangono evoluzioni future per un eventuale deployment production-grade.
+
+La loro assenza è quindi documentata come limite noto e non viene impropriamente classificata come `PASS`.
 
 ---
 
@@ -4745,8 +5366,8 @@ Questo approccio permette di verificare separatamente le componenti deterministi
 Le principali evidenze raccolte sono:
 
     Backend:
-    15 test files
-    86 automated tests
+    18 test files
+    120 automated tests
     Type Check PASS
     Lint PASS
     Build PASS
