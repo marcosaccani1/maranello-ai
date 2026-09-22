@@ -1,5 +1,9 @@
 import { env } from "../config/env.js";
 
+import {
+  fetchWithRetry,
+} from "./fetchWithRetry.js";
+
 
 export interface ChartFile {
   contentType: string;
@@ -40,7 +44,7 @@ export class ChartClient {
 
     try {
       response =
-        await fetch(
+        await fetchWithRetry(
           `${this.baseUrl}/charts/${encodeURIComponent(
             normalizedFilename,
           )}`,

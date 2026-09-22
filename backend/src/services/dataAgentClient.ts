@@ -4,6 +4,10 @@ import type {
   DataAgentResponse,
 } from "../models/dataAgent.js";
 
+import {
+  fetchWithRetry,
+} from "./fetchWithRetry.js";
+
 
 export class DataAgentClient {
   constructor(
@@ -20,7 +24,7 @@ export class DataAgentClient {
     let response: Response;
 
     try {
-      response = await fetch(
+      response = await fetchWithRetry(
         `${this.baseUrl}/api/analysis`,
         {
           method: "POST",
