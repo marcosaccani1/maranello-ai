@@ -73,7 +73,13 @@ The documentation describes the final Maranello AI architecture:
     RAG            Python Data Agent
       │                │
       ▼                ▼
-    ChromaDB        Pandas / Matplotlib
+    ChromaDB        Pandas Preparation
+      │                │
+      │                ▼
+      │             DuckDB Analytics
+      │                │
+      │                ▼
+      │             Matplotlib
       │                │
       ▼                ▼
     Knowledge       Manufacturing

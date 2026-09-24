@@ -172,7 +172,7 @@ Tra le attività analitiche rilevanti rientrano:
 - analisi dei trend temporali;
 - generazione di grafici.
 
-L'utente può quindi conoscere la domanda di business senza necessariamente conoscere il codice o le operazioni Pandas necessarie per ottenere il risultato.
+L'utente può quindi conoscere la domanda di business senza necessariamente conoscere il codice o le operazioni analitiche necessarie per ottenere il risultato.
 
 ### Mancanza di integrazione
 
@@ -256,12 +256,15 @@ Quando la richiesta richiede un'analisi quantitativa, il modello utilizza:
 
     analyze_manufacturing_data
 
-Il Backend delega quindi la richiesta al Python Data Agent basato su FastAPI e Pandas.
+Il Backend delega quindi la richiesta al Python Data Agent basato su FastAPI, Pandas e DuckDB.
+
+Pandas viene utilizzato per il caricamento e il cleaning deterministico del dataset, mentre DuckDB costituisce il layer analitico embedded utilizzato per persistenza locale, filtering e aggregazioni.
 
 Il Data Agent può:
 
 - caricare e pulire il Manufacturing Dataset;
-- calcolare KPI globali;
+- materializzare il dataset preparato nel database DuckDB locale;
+- calcolare KPI globali tramite query deterministiche;
 - aggregare i risultati per dimensioni supportate;
 - analizzare trend mensili;
 - generare grafici tramite Matplotlib;
@@ -434,6 +437,7 @@ Dal punto di vista tecnico, il progetto dimostra l'integrazione di:
 - Python;
 - FastAPI;
 - Pandas;
+- DuckDB;
 - Matplotlib;
 - Node.js;
 - Express;
@@ -682,6 +686,7 @@ Utilizza principalmente:
 - Python;
 - FastAPI;
 - Pandas;
+- DuckDB;
 - Matplotlib.
 
 Il componente:
@@ -689,10 +694,9 @@ Il componente:
 - riceve una richiesta analitica dal Backend;
 - interpreta la dimensione richiesta;
 - utilizza il Manufacturing Dataset;
-- esegue operazioni di cleaning;
-- calcola KPI;
-- esegue aggregazioni;
-- analizza trend;
+- esegue operazioni deterministiche di loading e cleaning tramite Pandas;
+- materializza il dataset preparato nel database DuckDB locale;
+- esegue KPI, aggregazioni e trend tramite query DuckDB controllate;
 - genera grafici quando necessario;
 - restituisce il risultato al Backend.
 
@@ -919,14 +923,14 @@ L'architettura finale è composta da servizi con responsabilità separate.
     ┌────────────────┐   ┌────────────────────┐
     │    ChromaDB    │   │ Python Data Agent  │
     │                │   │      FastAPI       │
-    │ Vector Store   │   │      Pandas        │
+    │ Vector Store   │   │  Pandas + DuckDB   │
     └───────┬────────┘   │     Matplotlib     │
             │            └─────────┬──────────┘
             ▼                      │
     ┌────────────────┐             ▼
     │ Knowledge Base │   ┌────────────────────┐
-    │                │   │ Manufacturing CSV  │
-    │ Fictional Docs │   │ Synthetic Dataset  │
+    │                │   │ CSV Source Dataset │
+    │ Fictional Docs │   │ + DuckDB Runtime   │
     └────────────────┘   └────────────────────┘
 
                    Node.js Backend
@@ -1142,7 +1146,7 @@ Il progetto viene considerato tecnicamente riuscito quando sono soddisfatti i se
 | SC-05 | Knowledge Base coerente con il business scenario | PASS |
 | SC-06 | Retrieval RAG tramite ChromaDB | PASS |
 | SC-07 | Routing autonomo tramite LLM function calling | PASS |
-| SC-08 | Analisi quantitativa tramite Pandas | PASS |
+| SC-08 | Analisi quantitativa deterministica tramite DuckDB, con preparazione dati tramite Pandas | PASS |
 | SC-09 | Generazione dei grafici | PASS |
 | SC-10 | Scenario RAG verificato | PASS |
 | SC-11 | Scenario Data Analysis verificato | PASS |

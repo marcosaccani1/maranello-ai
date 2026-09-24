@@ -43,7 +43,7 @@ Maranello AI adotta un'architettura distribuita composta principalmente da:
 - backend Node.js ed Express;
 - AI Orchestrator basato su OpenAI Responses API e function calling;
 - motore RAG integrato con ChromaDB;
-- Python Data Agent basato su FastAPI e Pandas;
+- Python Data Agent basato su FastAPI, Pandas e DuckDB;
 - Manufacturing Dataset in formato CSV;
 - Knowledge Base documentale indicizzata nel vector database.
 
@@ -1247,8 +1247,8 @@ La response pubblica non espone direttamente:
 - function call object;
 - chunk ChromaDB;
 - embedding;
-- output Pandas completo;
-- dataframe;
+- DataFrame Pandas utilizzati internamente durante la preparazione;
+- dettagli interni del datastore e delle query DuckDB;
 - percorsi filesystem;
 - URL interno del Python Data Agent.
 
@@ -2594,6 +2594,7 @@ Il servizio è implementato tramite:
 - Python;
 - FastAPI;
 - Pandas;
+- DuckDB;
 - Matplotlib.
 
 Il suo scopo è ricevere richieste analitiche dal backend Node.js, interpretarle attraverso una logica controllata e applicare operazioni deterministiche sul Manufacturing Dataset.
@@ -2618,12 +2619,14 @@ Questa separazione mantiene distinta la produzione dei fatti numerici dalla gene
 
 Il Data Agent è responsabile di:
 
-- caricamento del Manufacturing Dataset;
-- data cleaning;
-- normalizzazione dei valori;
+- caricamento del Manufacturing Dataset CSV;
+- data cleaning e normalizzazione tramite Pandas;
 - gestione dei record duplicati;
 - gestione delle anomalie previste nel dataset;
+- materializzazione del dataset preparato in DuckDB;
+- lifecycle e reload del datastore analitico locale;
 - interpretazione della richiesta analitica;
+- esecuzione di query analitiche deterministiche tramite DuckDB;
 - calcolo dei KPI;
 - aggregazioni per dimensione;
 - analisi temporali;
@@ -2739,7 +2742,13 @@ Request Validation
 Question Interpreter
    |
    v
-Analytics Engine
+DataAnalysisService
+   |
+   v
+DuckDBAnalysisRepository
+   |
+   v
+DuckDB manufacturing_data
    |
    +---- KPI Calculation
    |
@@ -2833,7 +2842,7 @@ Il Data Agent può calcolare i seguenti KPI globali:
 | `average_downtime_minutes` | Downtime medio in minuti. |
 | `average_cycle_time_seconds` | Cycle time medio in secondi. |
 
-L'Analytics Engine utilizza Pandas per eseguire i calcoli sui dati puliti.
+L'Analytics Engine utilizza `DuckDBAnalysisRepository` per eseguire i calcoli direttamente sul dataset preparato e materializzato in DuckDB.
 
 ---
 
@@ -3068,17 +3077,18 @@ Python Data Agent
 
 ---
 
-## 12.16 Data Cleaning e DatasetRepository
+## 12.16 Data Cleaning e DuckDBDatasetStore
 
-Il Manufacturing Dataset viene gestito attraverso un componente dedicato denominato `DatasetRepository`.
+Il Manufacturing Dataset utilizza una pipeline separata tra preparazione dei dati e interrogazione analitica.
 
-Il repository incapsula:
+Il CSV costituisce la sorgente riproducibile e versionata del progetto.
 
-- caricamento del CSV;
-- data cleaning;
-- preparazione del DataFrame;
-- caching del dataset preparato;
-- reload esplicito della sorgente.
+La preparazione viene eseguita attraverso:
+
+- `DataLoader`, responsabile del caricamento del CSV;
+- `DataCleaner`, responsabile della pipeline deterministica di cleaning;
+- Pandas, utilizzato come rappresentazione transitoria durante caricamento, normalizzazione e preparazione;
+- `DuckDBDatasetStore`, responsabile della materializzazione e del lifecycle del dataset analitico persistente locale.
 
 La pipeline di cleaning comprende:
 
@@ -3091,135 +3101,118 @@ La pipeline di cleaning comprende:
 - gestione dei quality score fuori intervallo;
 - preservazione controllata dei valori mancanti;
 - identificazione dei record con relazioni numeriche incoerenti;
-- gestione delle anomalie intenzionalmente presenti nel dataset.
+- gestione delle anomalie intenzionalmente presenti nel dataset;
+- produzione del campo derivato `valid_defect_data`.
 
-La pulizia viene applicata in modo deterministico e riproducibile.
-
-Il dataset preparato non viene tuttavia ricostruito a ogni richiesta `POST /api/analysis`.
-
-Il caricamento utilizza una strategia **lazy per processo**:
-
-    First Analysis Request
-            |
-            v
-    DatasetRepository.get()
-            |
-            v
-    Cache available?
-       /         \
-     No           Yes
-     |             |
-     v             |
-    Load CSV       |
-     |             |
-     v             |
-    Clean Data     |
-     |             |
-     v             |
-    Cache Prepared DataFrame
-       \          /
-        \        /
-         v      v
-       Analysis
-
-Alla prima analisi il repository:
-
-1. legge il Manufacturing Dataset;
-2. esegue la pipeline di cleaning;
-3. memorizza il DataFrame preparato in memoria.
-
-Le richieste successive riutilizzano il dataset preparato senza ripetere `pd.read_csv` e l'intera pipeline di cleaning.
-
-Questo elimina il costo di I/O e preparazione precedentemente associato a ogni richiesta analitica.
-
-Il repository espone inoltre un'operazione esplicita di `reload()` per ricostruire la cache quando necessario.
-
-Il reload viene gestito in modo transazionale: se il nuovo caricamento o cleaning fallisce, il dataset precedentemente disponibile rimane utilizzabile invece di sostituire la cache con uno stato non valido.
-
-Il repository protegge inoltre il DataFrame memorizzato da modifiche accidentali da parte delle analisi consumer.
-
----
-
-## 12.17 Dataset read-only e lifecycle
-
-Il Manufacturing Dataset viene utilizzato come sorgente analitica in sola lettura.
-
-Il Data Agent:
-
-- legge il CSV sorgente quando il `DatasetRepository` deve inizializzare o ricaricare la cache;
-- normalizza i dati in memoria;
-- conserva il dataset preparato per le analisi successive;
-- calcola risultati senza modificare il file CSV sorgente.
-
-Le normali richieste analitiche sono quindi prive di effetti persistenti sul dataset.
+La preparazione viene applicata in modo deterministico e riproducibile.
 
 Il lifecycle può essere sintetizzato come:
 
     Source CSV
         |
         v
-    Load + Clean
+    DataLoader
         |
         v
-    Prepared In-Memory Dataset
+    DataCleaner
         |
-        +---- Analysis Request 1
+        v
+    Prepared Pandas DataFrame
         |
-        +---- Analysis Request 2
+        v
+    DuckDBDatasetStore
         |
-        +---- Analysis Request N
-        |
-        +---- Explicit reload()
-                    |
-                    v
-               Load + Clean
-                    |
-                    v
-             Refreshed Cache
+        v
+    DuckDB manufacturing_data
 
-La cache è locale al processo del Python Data Agent e non costituisce una persistenza distribuita.
+`DuckDBDatasetStore.initialize()` verifica la disponibilità del datastore analitico locale e ne esegue la costruzione quando necessario.
 
-Per il dataset corrente, composto da circa 2.000 record, questo approccio mantiene Pandas semplice ed efficace eliminando al tempo stesso il caricamento ripetuto per richiesta.
+La materializzazione utilizza una tabella di staging con schema esplicito. Il DataFrame preparato viene registrato temporaneamente nella connessione DuckDB e copiato nella rappresentazione analitica persistente.
 
-Per volumi significativamente maggiori, il livello di accesso ai dati potrebbe essere sostituito da un motore query-oriented senza modificare il contratto HTTP del Data Agent.
+Il database DuckDB è un artefatto runtime locale e rigenerabile e non sostituisce il CSV come sorgente del progetto.
+
+`reload()` consente di ricostruire esplicitamente il dataset analitico a partire dalla sorgente CSV.
+
+La ricostruzione viene gestita transazionalmente: se caricamento, cleaning o materializzazione falliscono, la transazione viene annullata e il dataset analitico precedentemente disponibile rimane utilizzabile.
 
 ---
 
-## 12.18 No Arbitrary Code Execution
+## 12.17 Dataset read-only e lifecycle analitico
+
+Il file CSV sorgente viene trattato come input in sola lettura.
+
+Il Data Agent:
+
+- legge il CSV attraverso `DataLoader` durante inizializzazione o reload;
+- prepara e normalizza i dati tramite `DataCleaner` e Pandas;
+- materializza il dataset preparato nella tabella DuckDB `manufacturing_data`;
+- esegue le normali richieste analitiche attraverso `DuckDBAnalysisRepository`;
+- non modifica il file CSV sorgente durante le analisi.
+
+Il runtime analitico è quindi:
+
+    Analysis Request
+        |
+        v
+    Question Interpreter
+        |
+        v
+    DataAnalysisService
+        |
+        v
+    DuckDBAnalysisRepository
+        |
+        v
+    Read-Only DuckDB Query
+        |
+        v
+    Structured Result
+
+Le connessioni utilizzate dal repository per le query analitiche sono aperte in modalità read-only.
+
+Le normali richieste `POST /api/analysis` non ricostruiscono il dataset e non eseguono nuovamente il cleaning del CSV.
+
+Il datastore DuckDB introduce persistenza analitica locale embedded, ma rimane un artefatto rigenerabile. Non rappresenta una persistenza distribuita e non sostituisce la sorgente CSV versionata.
+
+Per il dataset corrente, composto da circa 2.000 record, DuckDB non è necessario per motivi di capacità. La scelta introduce invece un boundary query-oriented, separa preparazione e interrogazione dei dati e rende più controllata un'eventuale evoluzione futura del layer analitico.
+
+---
+
+## 12.18 No Arbitrary Code or SQL Execution
 
 Il Data Agent non esegue codice Python arbitrario generato dall'LLM.
 
-Non viene utilizzato un flusso del tipo:
+Non viene utilizzato un flusso nel quale il modello genera codice Python da passare a `exec(...)`.
 
-```text
-User Question
-    |
-    v
-LLM generates Python
-    |
-    v
-exec(...)
-```
+Allo stesso modo, la domanda dell'utente non viene trasformata in SQL arbitrario da eseguire direttamente sul database.
 
 L'approccio adottato è invece:
 
-```text
-User Question
-    |
-    v
-LLM chooses Data Agent
-    |
-    v
-Question Interpreter
-    |
-    v
-Predefined Analytical Operation
-    |
-    v
-Pandas
-```
+    User Question
+        |
+        v
+    LLM chooses Data Agent
+        |
+        v
+    Question Interpreter
+        |
+        v
+    Supported Analytical Operation
+        |
+        v
+    DataAnalysisService
+        |
+        v
+    DuckDBAnalysisRepository
+        |
+        v
+    Validated DuckDB Query
 
-La decisione è intenzionale e migliora:
+Le operazioni analitiche sono implementate dal repository.
+
+Per le analisi raggruppate, la dimensione richiesta deve appartenere a una whitelist esplicita di dimensioni supportate. Questo impedisce di utilizzare identificatori SQL arbitrari provenienti dalla richiesta utente.
+
+La decisione migliora:
 
 - sicurezza;
 - testabilità;
@@ -3472,8 +3465,10 @@ Il frontend non deve poter dipendere direttamente dalla sua posizione o configur
 Tra i principi applicati:
 
 - nessuna chiave OpenAI nel servizio analitico;
-- nessuna esecuzione arbitraria di codice;
-- dataset utilizzato in sola lettura;
+- nessuna esecuzione arbitraria di codice Python o SQL;
+- CSV sorgente utilizzato in sola lettura;
+- query analitiche eseguite attraverso operazioni DuckDB controllate;
+- dimensioni di grouping limitate a una whitelist esplicita;
 - output limitati alle operazioni previste;
 - nomi dei grafici generati dal sistema;
 - nessun percorso filesystem esposto al frontend;
@@ -3485,11 +3480,15 @@ Tra i principi applicati:
 
 La natura deterministica del Data Agent permette di testare direttamente:
 
-- cleaning del dataset;
-- KPI globali;
-- aggregazioni;
-- ranking;
+- loading e cleaning del dataset;
+- materializzazione e reload del datastore DuckDB;
+- comportamento transazionale in caso di reload fallito;
+- KPI globali eseguiti tramite DuckDB;
+- aggregazioni e ranking;
+- esclusione dei grouping null;
+- validazione delle dimensioni di grouping;
 - trend mensili;
+- comportamento con valori null e assenza di date valide;
 - Question Interpreter;
 - richieste italiane;
 - richieste inglesi;
@@ -3505,7 +3504,9 @@ A parità di dataset e richiesta, il motore analitico deve produrre risultati co
 
 La soluzione adottata offre i seguenti vantaggi:
 
-- utilizzo dell'ecosistema Pandas;
+- Pandas focalizzato sulla preparazione e sul cleaning dei dati;
+- DuckDB utilizzato come motore analitico embedded e persistente;
+- separazione tra preparazione, persistenza e query;
 - separazione dell'analytics dal backend;
 - risultati numerici deterministici;
 - maggiore sicurezza;
@@ -3528,7 +3529,7 @@ Il backend utilizza un solo punto di ingresso analitico:
 POST /api/analysis
 ```
 
-mentre il Data Agent mantiene internamente la responsabilità di interpretare la domanda, selezionare un'analisi supportata ed eseguirla tramite operazioni Pandas controllate.
+mentre il Data Agent mantiene internamente la responsabilità di interpretare la domanda, selezionare un'analisi supportata ed eseguirla attraverso query DuckDB controllate sul dataset preparato tramite Pandas.
 
 Questo approccio sostituisce il design iniziale basato su numerosi endpoint analitici separati e riflette l'architettura effettivamente implementata.
 
@@ -4172,8 +4173,8 @@ La baseline corrente verificata comprende:
 | Componente | Test superati |
 |------------|---------------|
 | Node.js Backend | 120 |
-| Python Data Agent | 80 |
-| **Totale** | **200** |
+| Python Data Agent | 79 |
+| **Totale** | **199** |
 
 Per il backend Node.js la suite è distribuita su:
 
@@ -4199,21 +4200,37 @@ Durante pytest può comparire uno `StarletteDeprecationWarning` proveniente dall
 
 ---
 
-## 15.3 DatasetRepository
+## 15.3 DuckDB analytical data layer
 
-I test del `DatasetRepository` verificano il nuovo lifecycle del Manufacturing Dataset.
+I test del layer analitico verificano separatamente il lifecycle del dataset e l'esecuzione delle query.
 
-Sono coperti scenari quali:
+I test di `DuckDBDatasetStore` coprono scenari quali:
 
-- caricamento iniziale lazy;
-- esecuzione del cleaning una sola volta durante la preparazione della cache;
-- riutilizzo del dataset preparato nelle analisi successive;
-- stato del repository prima del primo caricamento;
+- inizializzazione del database DuckDB locale;
+- caricamento e cleaning della sorgente CSV;
+- materializzazione del dataset preparato;
+- persistenza dei valori normalizzati;
+- conversione dei valori non validi secondo le regole di cleaning;
+- inizializzazione idempotente;
 - reload esplicito;
-- mantenimento della cache precedente quando un reload fallisce;
-- protezione del dataset cached da modifiche accidentali.
+- sostituzione del dataset esistente dopo un reload valido;
+- preservazione del datastore precedente quando un reload fallisce.
 
-È inoltre verificato che più analisi possano riutilizzare lo stesso dataset preparato senza ripetere caricamento e cleaning a ogni richiesta.
+I test di `DuckDBAnalysisRepository` verificano invece:
+
+- KPI globali;
+- esclusione dei record non validi dai KPI basati sulla difettosità;
+- gestione dei valori null nelle medie;
+- comportamento con produzione valida pari a zero;
+- aggregazioni per dimensione;
+- ordinamento dei risultati;
+- esclusione dei grouping null;
+- rifiuto delle dimensioni non appartenenti alla whitelist;
+- trend mensili ordinati cronologicamente;
+- comportamento in assenza di date valide;
+- errore controllato quando il database DuckDB non è disponibile.
+
+I test di `DataAnalysisService` verificano inoltre che più richieste analitiche possano utilizzare il datastore persistente senza ripetere caricamento e cleaning del CSV a ogni analisi e che le operazioni di inizializzazione e reload vengano delegate correttamente al dataset store.
 
 ---
 
@@ -4408,7 +4425,7 @@ La baseline analitica corrente comprende:
     average_downtime_minutes = 33.04
     average_cycle_time_seconds = 84.74
 
-Il mantenimento di questi valori dopo l'introduzione del `DatasetRepository` dimostra che l'ottimizzazione del lifecycle del dataset non ha modificato il risultato analitico atteso.
+Il mantenimento di questi valori dopo la migrazione del layer analitico a DuckDB verifica che la separazione tra preparazione Pandas, materializzazione persistente e query DuckDB non abbia modificato il risultato analitico atteso.
 
 ---
 
@@ -4478,67 +4495,75 @@ Le funzionalità indicate come future non devono essere interpretate come già i
 
 ---
 
-## 16.2 Evoluzione del layer analitico oltre Pandas
+## 16.2 Evoluzione del layer analitico
 
-Il Data Agent corrente utilizza Pandas.
+Il Data Agent corrente separa esplicitamente preparazione e interrogazione dei dati.
 
-Questa scelta rimane appropriata per il Manufacturing Dataset del progetto, composto da circa 2.000 record, e mantiene coerenza con i requisiti dell'assignment.
+Pandas viene utilizzato per caricamento, normalizzazione e cleaning della sorgente CSV. Il dataset preparato viene quindi materializzato in un database DuckDB locale e interrogato tramite `DuckDBAnalysisRepository`.
 
-L'introduzione del `DatasetRepository` elimina inoltre il precedente costo di caricamento e cleaning ripetuto per ogni richiesta, consentendo di riutilizzare il DataFrame preparato durante il lifecycle del processo.
+Il percorso corrente è:
 
-Per dataset dell'ordine di centinaia di migliaia o milioni di record, oppure quando il dataset non può essere mantenuto efficientemente in memoria, il layer di accesso ai dati dovrebbe essere rivalutato.
-
-Possibili evoluzioni includono:
-
-### DuckDB
-
-DuckDB rappresenterebbe una naturale evoluzione per workload analitici locali o embedded.
-
-Potrebbe consentire:
-
-- query SQL direttamente sui dati tabellari;
-- aggregazioni efficienti;
-- minore dipendenza dal caricamento completo del dataset in memoria;
-- utilizzo efficace di formati analitici come Parquet;
-- mantenimento di un deployment relativamente semplice.
-
-### SQLite
-
-SQLite potrebbe essere valutato quando siano utili:
-
-- persistenza locale strutturata;
-- query SQL;
-- indicizzazione;
-- gestione di dataset relazionali di dimensione moderata.
-
-Per workload prevalentemente OLAP e analitici, DuckDB sarebbe generalmente il candidato più naturale tra le due opzioni; SQLite rimane una possibile alternativa per scenari maggiormente orientati alla persistenza relazionale embedded.
-
-### Database esterno
-
-Per scenari multiutente o distribuiti potrebbe diventare appropriato un database esterno gestito.
-
-Il percorso evolutivo può essere rappresentato come:
-
-    Current Dataset
-    ~2,000 rows
+    Manufacturing CSV
          |
          v
-    Pandas
-    + DatasetRepository
+    DataLoader
          |
-         | dataset growth /
-         | memory pressure
          v
-    DuckDB / SQLite
+    DataCleaner + Pandas
          |
-         | distributed scale /
-         | multi-user requirements
          v
-    External Data Platform
+    DuckDBDatasetStore
+         |
+         v
+    Local DuckDB
+         |
+         v
+    DuckDBAnalysisRepository
+         |
+         v
+    Deterministic Analytical Queries
 
-Nessuna di queste migrazioni è implementata nella versione corrente.
+Per il Manufacturing Dataset del progetto, composto da circa 2.000 record nella sorgente CSV, DuckDB non è necessario per ragioni di capacità.
 
-La scelta intenzionale è mantenere Pandas per il perimetro attuale e definire chiaramente il punto nel quale un motore query-oriented diventerebbe architetturalmente preferibile.
+La scelta è architetturale: introduce un boundary query-oriented, evita di utilizzare un DataFrame condiviso come datastore analitico, rende persistente localmente il dataset preparato e separa il lifecycle di preparazione dalle normali richieste analitiche.
+
+DuckDB permette inoltre di mantenere un deployment embedded semplice e offre un percorso naturale verso workload tabellari più ampi e formati analitici come Parquet.
+
+L'eventuale evoluzione futura non consiste quindi nell'introdurre DuckDB, che fa già parte dell'architettura corrente, ma nel valutare un'infrastruttura analitica esterna quando requisiti di scala o governance lo rendano necessario.
+
+Fattori che potrebbero motivare tale evoluzione includono:
+
+- crescita significativa del volume dei dati;
+- aggiornamenti più frequenti;
+- accesso concorrente da più istanze;
+- necessità di storage condiviso;
+- requisiti di alta disponibilità;
+- governance e lineage enterprise;
+- integrazione con ulteriori sorgenti dati;
+- workload analitici distribuiti.
+
+Un possibile percorso evolutivo è:
+
+    Current Architecture
+    CSV + Pandas Preparation
+    + Embedded DuckDB Analytics
+         |
+         | volume / concurrency /
+         | governance growth
+         v
+    External Analytical Data Platform
+         |
+         +---- Data Warehouse
+         |
+         +---- Lakehouse
+         |
+         +---- Managed Analytical Database
+
+La sostituzione del datastore analitico non richiederebbe necessariamente una modifica del contratto HTTP del Data Agent.
+
+`POST /api/analysis` può rimanere stabile mentre l'implementazione interna del layer di accesso ai dati evolve.
+
+Questa separazione mantiene il progetto proporzionato allo scope corrente senza vincolare l'architettura a una singola soluzione di storage per scenari futuri.
 
 ---
 
@@ -4695,19 +4720,19 @@ In questo scenario la retention potrebbe essere delegata al servizio di storage 
 
 ## 16.11 Dataset refresh automatizzato
 
-Il `DatasetRepository` espone un meccanismo esplicito di reload.
+`DuckDBDatasetStore` espone un meccanismo esplicito di `reload()` che ricostruisce il datastore analitico a partire dalla sorgente CSV.
 
 La versione corrente non implementa un refresh automatico del Manufacturing Dataset.
 
 In uno scenario con dati aggiornati dinamicamente si potrebbero introdurre:
 
-- invalidazione temporale della cache;
 - refresh schedulato;
 - refresh event-driven;
+- controllo della data di modifica della sorgente;
 - versionamento del dataset;
-- controllo della data di modifica della sorgente.
+- acquisizione da sorgenti dati esterne.
 
-Qualunque strategia dovrebbe mantenere la proprietà attuale per cui un refresh fallito non invalida un dataset precedentemente utilizzabile.
+Qualunque strategia dovrebbe preservare la proprietà corrente del reload transazionale: un refresh fallito non deve sostituire o invalidare un datastore analitico precedentemente utilizzabile.
 
 ---
 
@@ -4838,7 +4863,7 @@ o per combinarli all'interno della stessa richiesta.
 
 La continuità conversazionale viene mantenuta tramite `sessionId` e OpenAI response identifiers.
 
-Il Python Data Agent utilizza un approccio deterministico basato su Pandas, evitando l'esecuzione arbitraria di codice generato dal modello.
+Il Python Data Agent utilizza un approccio deterministico nel quale Pandas prepara e normalizza i dati sorgente, mentre DuckDB costituisce il layer analitico persistente locale interrogato attraverso operazioni controllate. Il servizio non esegue codice Python o SQL arbitrario generato dal modello.
 
 I grafici vengono prodotti tramite Matplotlib e distribuiti al frontend attraverso il Chart Proxy del backend.
 

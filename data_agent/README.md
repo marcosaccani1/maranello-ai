@@ -4,7 +4,9 @@ The Python Data Agent is the deterministic analytical microservice of Maranello 
 
 It is responsible for answering manufacturing-data questions that require structured numerical analysis rather than Knowledge Base retrieval.
 
-The service is implemented with Python, FastAPI and Pandas and is called by the Node.js orchestration Backend when the LLM selects the manufacturing-data analysis tool.
+The service is implemented with Python and FastAPI. Pandas is used in the deterministic dataset loading and cleaning pipeline, while DuckDB provides the persistent local analytical storage and query layer.
+
+The Data Agent is called by the Node.js orchestration Backend when the LLM selects the manufacturing-data analysis tool.
 
 The Data Agent does not independently decide whether a request should use RAG or data analysis. Autonomous tool selection remains the responsibility of the LLM orchestration layer in the Node.js Backend.
 
@@ -14,15 +16,15 @@ The Data Agent does not independently decide whether a request should use RAG or
 
 The Data Agent is responsible for:
 
-- loading the synthetic Manufacturing Dataset;
+- loading the synthetic Manufacturing Dataset from CSV when the analytical database must be initialized or refreshed;
 - applying deterministic data-cleaning rules;
+- materializing the prepared dataset into a local DuckDB database;
 - interpreting supported analytical questions;
-- calculating manufacturing KPIs;
+- calculating manufacturing KPIs through deterministic DuckDB queries;
 - performing grouped analyses;
 - calculating monthly defect-rate trends;
 - generating chart images when required;
 - returning structured analytical results to the Node.js Backend;
-- caching the prepared dataset for reuse across analytical requests;
 - managing the lifecycle of generated chart files.
 
 The current analytical model is intentionally deterministic.
@@ -45,15 +47,31 @@ The Data Agent follows the high-level flow:
           ↓
     QuestionInterpreter
           ↓
-    DatasetRepository
+    DuckDBAnalysisRepository
           ↓
-    Prepared Pandas DataFrame
+    DuckDB analytical queries
           ↓
     Deterministic Analysis
           ↓
     Optional Chart Generation
           ↓
     Structured Analysis Response
+
+The analytical database is prepared through a separate storage lifecycle:
+
+    Source CSV
+        ↓
+    DataLoader
+        ↓
+    DataCleaner
+        ↓
+    Prepared Pandas DataFrame
+        ↓
+    DuckDBDatasetStore
+        ↓
+    Local DuckDB database
+
+This separation keeps dataset preparation, analytical querying and application orchestration as distinct responsibilities.
 
 The main application components are located under:
 
@@ -69,13 +87,13 @@ The current structure includes:
     ├── models/
     │   └── analysis.py
     ├── services/
-    │   ├── analysis_service.py
     │   ├── chart_cleanup_service.py
     │   ├── chart_service.py
     │   ├── data_analysis_service.py
     │   ├── data_cleaner.py
     │   ├── data_loader.py
-    │   ├── dataset_repository.py
+    │   ├── duckdb_analysis_repository.py
+    │   ├── duckdb_dataset_store.py
     │   └── question_interpreter.py
     └── main.py
 
@@ -83,7 +101,7 @@ The current structure includes:
 
 # Dataset
 
-By default, the service reads:
+The source Manufacturing Dataset is:
 
     data/manufacturing_quality_data.csv
 
@@ -97,35 +115,39 @@ The Data Agent must not be interpreted as processing real Ferrari manufacturing 
 
 ---
 
-# Dataset Preparation and Cache
+# DuckDB Analytical Data Layer
 
-Dataset access is encapsulated by `DatasetRepository`.
+The Data Agent uses DuckDB as its embedded analytical storage and query layer.
 
-The repository uses a lazy per-process cache.
+The local analytical database is stored by default at:
 
-On the first analytical request:
+    data/manufacturing_quality.duckdb
 
-    CSV
-     ↓
+The database is a runtime artifact and is excluded from Git.
+
+Its lifecycle is managed by `DuckDBDatasetStore`.
+
+When the database must be created or refreshed, the preparation pipeline is:
+
+    Manufacturing CSV
+          ↓
     DataLoader
-     ↓
+          ↓
     DataCleaner
-     ↓
+          ↓
     Prepared Pandas DataFrame
-     ↓
-    DatasetRepository cache
+          ↓
+    DuckDBDatasetStore
+          ↓
+    DuckDB analytical table
 
-Subsequent analytical requests reuse the prepared dataset rather than reading and cleaning the CSV again.
+The source CSV therefore remains the reproducible project data source, while DuckDB acts as the local query-oriented representation used by the analytical runtime.
 
-This removes repeated disk I/O and deterministic preparation work from every `POST /api/analysis` request.
+This design avoids keeping the complete prepared analytical dataset as the primary in-memory query layer and allows filtering and aggregation to be executed directly by DuckDB.
 
-The repository also provides explicit reload behavior for cases in which the source dataset must be refreshed.
+The DuckDB file can be rebuilt from the source dataset through the deterministic preparation pipeline.
 
-A failed reload does not invalidate the existing valid cache. The previously valid cache and its prepared dataset remain available.
-
-The repository protects its cached source DataFrame from accidental mutation by downstream analytical operations.
-
-The cache is local to the running Data Agent process and is not a distributed cache.
+The database is intentionally treated as a generated local artifact rather than a source-controlled project asset.
 
 ---
 
@@ -148,9 +170,43 @@ These include:
 
 The `QuestionInterpreter` maps supported natural-language questions to the corresponding deterministic analytical operation.
 
+`DuckDBAnalysisRepository` owns the query-oriented analytical operations against the prepared DuckDB dataset.
+
+The repository executes controlled analytical SQL rather than arbitrary user-provided SQL or arbitrary LLM-generated Python code.
+
 Unsupported or ambiguous analytical combinations are rejected instead of silently inventing an analysis.
 
-This behavior keeps analytical execution bounded and testable.
+This behavior keeps analytical execution bounded, reproducible and testable.
+
+---
+
+# Data Preparation and Analytical Query Separation
+
+The architecture deliberately separates two different responsibilities.
+
+Dataset preparation uses:
+
+    CSV
+      ↓
+    DataLoader
+      ↓
+    DataCleaner
+      ↓
+    Pandas DataFrame
+
+Analytical execution uses:
+
+    DuckDB database
+          ↓
+    DuckDBAnalysisRepository
+          ↓
+    Controlled SQL aggregation
+          ↓
+    Analytical result models
+
+Pandas therefore remains useful for deterministic ingestion and cleaning, but it is no longer the primary analytical query engine.
+
+This separation provides a clearer boundary between source-data preparation and repeated analytical workloads.
 
 ---
 
@@ -167,6 +223,8 @@ The FastAPI application exposes this directory through:
     /charts
 
 The Node.js Backend retrieves generated charts from the Data Agent and proxies them through the main Backend API before they are rendered by the React frontend.
+
+Chart generation consumes deterministic analytical results rather than performing independent business calculations.
 
 ---
 
@@ -233,6 +291,8 @@ Receives an analytical natural-language question and returns a structured analys
 
 The request is processed by `DataAnalysisService`.
 
+The service interprets the analytical request, ensures that the DuckDB analytical dataset is available and delegates supported calculations to `DuckDBAnalysisRepository`.
+
 Validation and supported analytical behavior are defined by the Data Agent models, interpreter and deterministic analytical services.
 
 `ValueError` and `FileNotFoundError` failures generated by the analytical pipeline are converted into:
@@ -263,24 +323,31 @@ The service reads optional environment configuration from:
 
 Unknown environment variables are ignored.
 
-The current settings include:
+The current settings include configuration for:
 
-    service_name
-    environment
-    project_root
-    dataset_path
-    charts_directory
-    chart_retention_hours
-    chart_cleanup_interval_minutes
+- service identity and environment;
+- project paths;
+- source dataset path;
+- DuckDB database path;
+- generated-chart directory;
+- chart retention;
+- chart cleanup interval.
 
 Default service values include:
 
     service_name = maranello-ai-data-agent
     environment = development
 
-Default data paths resolve to:
+The default source dataset resolves to:
 
     data/manufacturing_quality_data.csv
+
+The default generated DuckDB database resolves to:
+
+    data/manufacturing_quality.duckdb
+
+Generated charts resolve to:
+
     data_agent/generated_charts/
 
 Default chart lifecycle values are:
@@ -303,6 +370,7 @@ Runtime dependencies declared in `pyproject.toml` include:
 - FastAPI;
 - Uvicorn;
 - Pandas;
+- DuckDB;
 - Matplotlib;
 - Pydantic;
 - Pydantic Settings.
@@ -354,89 +422,82 @@ The Data Agent includes unit and integration tests covering the analytical and s
 
 From the repository root, with the Python virtual environment activated, run:
 
-    python -m pytest data_agent/tests
-    ruff check data_agent
+    python -m ruff check data_agent/app data_agent/tests
 
-The final validated Data Agent baseline contains:
+Then run:
 
-    80 automated tests
+    cd data_agent
+    python -m pytest tests
+    cd ..
 
-The validated project state produced:
-
-    Pytest: 80 passed
-    Ruff: All checks passed
-
-The suite covers areas including:
+The DuckDB migration includes automated coverage for areas including:
 
 - dataset loading;
 - deterministic cleaning;
 - question interpretation;
-- global analysis;
+- DuckDB dataset creation and refresh;
+- DuckDB schema and prepared-data persistence;
+- global KPI analysis;
 - grouped analysis;
 - monthly analysis;
+- null handling and analytical edge cases;
+- unsupported analytical dimensions;
 - chart generation;
 - API integration;
 - real-dataset behavior;
-- `DatasetRepository` lazy caching;
-- reuse of the prepared dataset across analyses;
-- explicit dataset reload;
-- cache preservation after a failed reload;
-- cached DataFrame protection;
 - `ChartCleanupService`;
 - managed chart retention;
 - FastAPI startup cleanup;
 - periodic cleanup;
 - graceful cleanup-task cancellation during shutdown.
 
-The validated test run also reported one `StarletteDeprecationWarning` originating from the installed FastAPI/Starlette testing dependency stack.
+After the DuckDB migration, the complete Data Agent suite must be used as the authoritative source for the current automated-test count.
 
-The warning does not represent a failing project test or an application runtime error.
+The installed FastAPI/Starlette testing dependency stack may also report a `StarletteDeprecationWarning` related to its test-client implementation. This warning does not represent a failing project test or an application runtime error.
 
 ---
 
 # Scalability
 
-The current implementation intentionally uses Pandas.
+The current implementation uses DuckDB as an embedded analytical query engine.
 
-For the present synthetic dataset of approximately 2,000 rows, Pandas combined with the per-process `DatasetRepository` cache provides an appropriate balance of simplicity, transparency and analytical capability.
+This is an intentional architectural improvement over using a prepared Pandas DataFrame as the primary analytical runtime.
 
-Caching removes repeated CSV loading and cleaning overhead, but it does not turn Pandas into a database or remove the memory implications of increasingly large datasets.
+For the current synthetic dataset of approximately 2,000 rows, either approach would be computationally sufficient. DuckDB was introduced primarily to establish a more scalable and query-oriented data-access boundary rather than because the current dataset requires database-scale performance.
 
-If the analytical dataset grows to hundreds of thousands or millions of rows, or if memory pressure becomes significant, the storage and query layer should be re-evaluated.
+The current architecture allows:
 
-Potential evolution paths include:
-
-- DuckDB for analytical SQL over tabular or columnar data such as CSV and Parquet;
-- SQLite for lightweight embedded relational persistence and queries;
-- an external database for larger production workloads, concurrency or deployment requirements.
-
-A larger-scale architecture could push filtering and aggregation into the query engine before converting smaller analytical result sets into Pandas structures when necessary.
+- persistent local storage of the prepared analytical dataset;
+- SQL-based filtering and aggregation;
+- analytical work to remain outside the conversational Backend;
+- deterministic and testable queries;
+- the source CSV to remain the reproducible project source;
+- the analytical database to be regenerated as a local runtime artifact;
+- future dataset growth without coupling business analysis directly to an in-memory DataFrame cache.
 
 Conceptually:
 
-    Current
-    CSV
-      ↓
-    DatasetRepository
-      ↓
-    Prepared Pandas DataFrame
-      ↓
-    Deterministic Analysis
+    Source CSV
+        ↓
+    Deterministic preparation
+        ↓
+    DuckDB
+        ↓
+    Controlled analytical SQL
+        ↓
+    Structured analytical results
 
-    Future larger-scale option
-    Persistent / columnar data
-      ↓
-    DuckDB, SQLite or external database
-      ↓
-    SQL filtering and aggregation
-      ↓
-    Smaller analytical result set
-      ↓
-    Deterministic Analysis
+For larger production deployments, further evolution could include:
 
-DuckDB and SQLite are documented scalability options, not current runtime dependencies.
+- Parquet or other columnar source formats;
+- externally managed analytical databases;
+- cloud data warehouses or lakehouse platforms;
+- distributed storage and compute;
+- scheduled or event-driven ingestion pipelines.
 
-The deterministic analytical contract of the Data Agent can remain stable even if the underlying storage and query implementation changes.
+DuckDB remains an embedded single-process analytical engine in the current project. It is not presented as a substitute for every production-scale database architecture.
+
+The deterministic analytical contract of the Data Agent can remain stable even if the underlying storage implementation evolves further.
 
 ---
 
@@ -447,14 +508,18 @@ The current Data Agent is designed for the educational, portfolio and local inte
 It intentionally does not implement:
 
 - arbitrary execution of LLM-generated Python code;
-- distributed dataset caching;
-- a production database;
+- arbitrary user-provided SQL execution;
+- a remote production database;
 - distributed background-job infrastructure;
 - persistent chart object storage;
 - horizontal scaling coordination;
 - production authentication or authorization.
 
-These are possible production-scale extensions rather than incomplete requirements of the current implementation.
+DuckDB is implemented as the local embedded analytical data layer.
+
+The generated DuckDB database is a runtime artifact and is not committed to the repository.
+
+More advanced distributed or externally managed data platforms remain possible production-scale extensions rather than incomplete requirements of the current implementation.
 
 ---
 
@@ -472,7 +537,7 @@ The expected production-style request path inside the project is:
           ↓
     Python Data Agent
           ↓
-    Deterministic Manufacturing Analysis
+    DuckDB-backed Deterministic Manufacturing Analysis
 
 The Node.js Backend owns:
 
@@ -486,7 +551,7 @@ The Node.js Backend owns:
 - Chat API rate limiting;
 - request observability.
 
-The Python Data Agent remains focused on deterministic manufacturing analytics and chart lifecycle management.
+The Python Data Agent remains focused on deterministic manufacturing analytics, local analytical-data management and chart lifecycle management.
 
 ---
 

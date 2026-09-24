@@ -72,7 +72,9 @@ Il modello dati non rappresenta un database relazionale tradizionale.
 
 L'implementazione finale utilizza invece differenti meccanismi di persistenza e rappresentazione:
 
-- file CSV per il Manufacturing Dataset;
+- file CSV come sorgente riproducibile del Manufacturing Dataset;
+- DataFrame Pandas transitori per caricamento, normalizzazione e cleaning;
+- database DuckDB locale come rappresentazione analitica persistente e rigenerabile del Manufacturing Dataset preparato;
 - file Markdown per la Knowledge Base;
 - ChromaDB per gli embedding documentali;
 - strutture dati in-memory per le sessioni conversazionali;
@@ -295,7 +297,9 @@ Questi file:
 
 Il modello logico finale di Maranello AI non è basato su una struttura relazionale composta da entità separate.
 
-Il Manufacturing Dataset utilizza invece un modello **tabellare denormalizzato**, progettato specificamente per supportare analisi quantitative tramite Pandas.
+Il Manufacturing Dataset utilizza invece un modello **tabellare denormalizzato**.
+
+Il CSV costituisce la sorgente riproducibile e versionata del dataset. Pandas viene utilizzato come rappresentazione transitoria durante caricamento, normalizzazione e cleaning, mentre il dataset preparato viene materializzato nella tabella DuckDB `manufacturing_data`, utilizzata come rappresentazione persistente locale per le query analitiche deterministiche.
 
 Parallelamente, il sistema utilizza modelli distinti per:
 
@@ -327,7 +331,11 @@ Il modello dati è organizzato in quattro macroaree principali.
 ```mermaid
 flowchart LR
 
-    Dataset["Manufacturing Dataset<br/>CSV"]
+    Dataset["Manufacturing Dataset<br/>CSV Source"]
+
+    Prepared["Prepared Data<br/>Pandas DataFrame"]
+
+    DuckDB["Analytical Dataset<br/>DuckDB"]
 
     DataAgent["Python Data Agent"]
 
@@ -345,7 +353,9 @@ flowchart LR
 
     Charts["Generated Charts<br/>PNG"]
 
-    Dataset --> DataAgent
+    Dataset --> Prepared
+    Prepared --> DuckDB
+    DuckDB --> DataAgent
 
     KB --> Vector
 
@@ -383,12 +393,30 @@ Le informazioni necessarie alle analisi sono direttamente contenute nel record d
 
 Questa scelta semplifica:
 
-- caricamento tramite Pandas;
-- cleaning;
-- aggregazioni;
+- caricamento e cleaning tramite Pandas;
+- materializzazione del dataset preparato in DuckDB;
+- aggregazioni e query analitiche deterministiche;
 - calcolo dei KPI;
 - generazione di grafici;
 - riproducibilità delle analisi.
+
+La rappresentazione del Manufacturing Dataset attraversa quindi tre livelli distinti:
+
+    Manufacturing CSV
+           |
+           v
+    Prepared Pandas DataFrame
+           |
+           v
+    DuckDB manufacturing_data
+
+Il CSV rimane la sorgente versionata e riproducibile del progetto.
+
+Il DataFrame Pandas è una rappresentazione transitoria utilizzata esclusivamente durante la preparazione dei dati.
+
+La tabella DuckDB `manufacturing_data` costituisce invece la rappresentazione analitica persistente locale utilizzata dal `DuckDBAnalysisRepository` per KPI, aggregazioni e trend.
+
+Il database DuckDB è un artefatto runtime rigenerabile e non sostituisce il CSV come sorgente del dataset.
 
 ---
 
@@ -479,10 +507,11 @@ L'unificazione avviene solamente a livello dell'AI Decision Engine durante la ge
 
 Il modello as-built offre i seguenti vantaggi:
 
-- semplicità del dataset analitico;
+- semplicità del modello tabellare analitico;
 - separazione tra fonti documentali e strutturate;
 - tracciabilità;
-- facile utilizzo con Pandas;
+- separazione esplicita tra preparazione Pandas e query DuckDB;
+- persistenza analitica embedded e rigenerabile;
 - supporto naturale al RAG;
 - ridotto accoppiamento tra componenti;
 - maggiore testabilità;
@@ -713,14 +742,16 @@ Il dataset è sintetico ed è stato progettato per simulare dati realistici rela
 
 Ogni riga rappresenta un singolo batch produttivo.
 
-Il dataset finale contiene:
+Il dataset CSV sorgente contiene:
 
-```text
-2000 rows
-20 columns
-```
+    2000 rows
+    20 columns
 
 Le 2000 righe includono intenzionalmente duplicati e anomalie utilizzati per validare il processo di data cleaning.
+
+Dopo il caricamento e il cleaning tramite Pandas, il dataset preparato viene materializzato nella tabella DuckDB `manufacturing_data`.
+
+La rappresentazione analitica risultante contiene 1980 record dopo la rimozione dei duplicati e include il campo derivato `valid_defect_data`, utilizzato per distinguere le righe valide per il calcolo dei KPI basati sulla difettosità.
 
 ---
 
@@ -2182,10 +2213,13 @@ Python Data Agent
 Question Interpreter
     |
     v
-Clean Manufacturing Data
+DataAnalysisService
     |
     v
-Analytics Engine
+DuckDBAnalysisRepository
+    |
+    v
+DuckDB manufacturing_data
     |
     +----> Metrics / Aggregations
     |
@@ -2349,7 +2383,7 @@ I principali KPI attesi sono:
 | Average Downtime Minutes | 33.04 |
 | Average Cycle Time Seconds | 84.74 |
 
-Questi valori permettono di rilevare regressioni nella logica di cleaning o aggregazione.
+Questi valori permettono di rilevare regressioni nella logica di cleaning, materializzazione in DuckDB o aggregazione analitica.
 
 ---
 
@@ -2488,14 +2522,16 @@ Il Data Model finale di Maranello AI riflette direttamente l'architettura implem
 
 Il sistema utilizza differenti rappresentazioni in base alla natura delle informazioni:
 
-- CSV per i dati strutturati di produzione e qualità;
+- CSV come sorgente riproducibile dei dati strutturati di produzione e qualità;
+- Pandas come rappresentazione transitoria per caricamento e cleaning;
+- DuckDB come rappresentazione analitica persistente locale e rigenerabile;
 - Markdown per la Knowledge Base;
 - ChromaDB per chunk ed embedding;
 - strutture in-memory per la conversazione;
 - JSON per la comunicazione tra servizi;
 - PNG per i grafici generati runtime.
 
-Il Manufacturing Dataset utilizza un modello tabellare denormalizzato a livello di production batch, progettato per consentire analisi efficienti tramite Pandas.
+Il Manufacturing Dataset utilizza un modello tabellare denormalizzato a livello di production batch. Pandas prepara i dati provenienti dal CSV, mentre DuckDB materializza il dataset preparato e costituisce il layer interrogato per KPI, aggregazioni e trend deterministici.
 
 La Knowledge Base mantiene invece una struttura documentale indipendente e viene trasformata in chunk ed embedding durante il processo di ingestion.
 

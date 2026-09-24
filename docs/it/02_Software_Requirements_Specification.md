@@ -405,9 +405,12 @@ Il servizio analitico utilizza:
     Python
     FastAPI
     Pandas
+    DuckDB
     Matplotlib
 
-Il Data Agent deve operare sul Manufacturing Dataset CSV.
+Il Data Agent deve utilizzare il Manufacturing Dataset CSV come fonte riproducibile dei dati analitici.
+
+Pandas viene utilizzato per il caricamento e il cleaning deterministico, mentre il dataset preparato viene materializzato in DuckDB per l'esecuzione delle query analitiche.
 
 L'analisi deve essere controllata e deterministica.
 
@@ -1150,10 +1153,10 @@ Il servizio espone inoltre un health check utilizzabile per verificarne la dispo
 |-------|--------|
 | Priorità | Must Have |
 | Attore | Python Data Agent |
-| Descrizione | Il Data Agent deve caricare il Manufacturing Dataset CSV utilizzato come unica fonte per le analisi quantitative del progetto. |
+| Descrizione | Il Data Agent deve caricare il Manufacturing Dataset CSV utilizzato come fonte riproducibile per le analisi quantitative del progetto. |
 | Input | Manufacturing Dataset |
-| Output | Dataset disponibile per il processo analitico |
-| Criterio di accettazione | Il dataset viene caricato correttamente e può essere elaborato attraverso Pandas. |
+| Output | Dataset preparato e disponibile nel layer analitico DuckDB |
+| Criterio di accettazione | Il dataset viene caricato e pulito deterministicamente tramite Pandas e materializzato correttamente nel database DuckDB locale. |
 
 La versione finale del dataset contiene:
 
@@ -1303,7 +1306,7 @@ La versione corrente non supporta arbitrariamente:
 
 - più dimensioni di raggruppamento nella stessa analisi;
 - combinazione libera di grouped analysis e temporal analysis;
-- query Pandas generiche;
+- query analitiche o SQL arbitrarie;
 - esecuzione di codice Python fornito dall'utente;
 - esecuzione di codice Python generato dal Large Language Model.
 
@@ -1685,7 +1688,7 @@ Il supporto bilingue deve applicarsi anche a scenari nei quali la query e la doc
 |-------|--------|
 | Priorità | Must Have |
 | Descrizione | I valori quantitativi presentati come risultati delle analisi manifatturiere devono provenire dal Python Data Agent. |
-| Criterio di accettazione | KPI, confronti e trend vengono calcolati attraverso Pandas sul Manufacturing Dataset e non inventati dal modello. |
+| Criterio di accettazione | KPI, confronti e trend vengono calcolati dal Data Agent attraverso query DuckDB deterministiche sul dataset preparato e non inventati dal modello. |
 
 ---
 
@@ -1846,7 +1849,9 @@ La risposta utilizza la Manufacturing Quality Policy e restituisce la soglia doc
       ↓
     Python Data Agent
       ↓
-    Pandas Analysis
+    DuckDBAnalysisRepository
+      ↓
+    Deterministic DuckDB Query
       ↓
     Tool Result
       ↓
@@ -2067,7 +2072,7 @@ I criteri di accettazione verificano che l'implementazione finale soddisfi lo sc
 | AC-019 | Il Python Data Agent utilizza il Manufacturing Dataset CSV. | PASS |
 | AC-020 | Il Data Agent applica il processo di cleaning previsto. | PASS |
 | AC-021 | Il Data Agent utilizza un Question Interpreter deterministico. | PASS |
-| AC-022 | Il Data Agent calcola KPI globali attraverso Pandas. | PASS |
+| AC-022 | Il Data Agent calcola KPI globali attraverso query DuckDB deterministiche. | PASS |
 | AC-023 | Il Data Agent supporta grouped analysis per le dimensioni previste. | PASS |
 | AC-024 | Il Data Agent supporta il monthly trend del defect rate. | PASS |
 | AC-025 | Il Data Agent non esegue arbitrary LLM-generated Python code. | PASS |
@@ -2114,7 +2119,8 @@ Il sistema soddisfa l'obiettivo principale di fornire un'unica interfaccia conve
 - ChromaDB;
 - Knowledge Base aziendale fittizia;
 - Python Data Agent;
-- analisi deterministica tramite Pandas;
+- preparazione deterministica dei dati tramite Pandas;
+- analisi deterministica tramite DuckDB;
 - Manufacturing Dataset sintetico;
 - generazione di grafici tramite Matplotlib;
 - conversation memory;
