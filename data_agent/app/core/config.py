@@ -9,11 +9,19 @@ class Settings(BaseSettings):
     environment: str = "development"
 
     project_root: Path = Path(__file__).resolve().parents[3]
+
     dataset_path: Path = (
         project_root
         / "data"
         / "manufacturing_quality_data.csv"
     )
+
+    database_path: Path = (
+        project_root
+        / "data"
+        / "manufacturing_quality.duckdb"
+    )
+
     charts_directory: Path = (
         project_root
         / "data_agent"

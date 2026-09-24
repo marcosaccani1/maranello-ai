@@ -1,14 +1,16 @@
 from typing import Literal
 
-import pandas as pd
-
 from app.core.config import settings
 from app.models.analysis import AnalysisResult
-from app.services.analysis_service import AnalysisService
 from app.services.chart_service import ChartService
 from app.services.data_cleaner import DataCleaner
 from app.services.data_loader import DataLoader
-from app.services.dataset_repository import DatasetRepository
+from app.services.duckdb_analysis_repository import (
+    DuckDBAnalysisRepository,
+)
+from app.services.duckdb_dataset_store import (
+    DuckDBDatasetStore,
+)
 from app.services.question_interpreter import QuestionInterpreter
 
 AnalysisType = Literal[
@@ -21,14 +23,15 @@ AnalysisType = Literal[
 class DataAnalysisService:
     def __init__(
         self,
-        dataset_repository: DatasetRepository | None = None,
-        analysis_service: AnalysisService | None = None,
+        dataset_store: DuckDBDatasetStore | None = None,
+        analysis_repository: DuckDBAnalysisRepository | None = None,
         chart_service: ChartService | None = None,
         question_interpreter: QuestionInterpreter | None = None,
     ) -> None:
-        self.dataset_repository = (
-            dataset_repository
-            or DatasetRepository(
+        self.dataset_store = (
+            dataset_store
+            or DuckDBDatasetStore(
+                database_path=settings.database_path,
                 loader=DataLoader(
                     settings.dataset_path
                 ),
@@ -36,8 +39,11 @@ class DataAnalysisService:
             )
         )
 
-        self.analysis_service = (
-            analysis_service or AnalysisService()
+        self.analysis_repository = (
+            analysis_repository
+            or DuckDBAnalysisRepository(
+                database_path=settings.database_path
+            )
         )
 
         self.chart_service = (
@@ -51,6 +57,10 @@ class DataAnalysisService:
             question_interpreter
             or QuestionInterpreter()
         )
+
+    def initialize_dataset(self) -> None:
+        """Ensure the persistent DuckDB dataset is available."""
+        self.dataset_store.initialize()
 
     def analyze_question(
         self,
@@ -70,37 +80,33 @@ class DataAnalysisService:
         analysis_type: AnalysisType,
         dimension: str | None = None,
     ) -> AnalysisResult:
-        dataframe = self.dataset_repository.get()
+        self.initialize_dataset()
 
         if analysis_type == "global_kpis":
-            return self._global_kpis(dataframe)
+            return self._global_kpis()
 
         if analysis_type == "grouped_defect_rate":
             return self._grouped_defect_rate(
-                dataframe,
-                dimension,
+                dimension
             )
 
         if analysis_type == "monthly_trend":
-            return self._monthly_trend(
-                dataframe
-            )
+            return self._monthly_trend()
 
         raise ValueError(
             f"Unsupported analysis type: {analysis_type}"
         )
 
-    def reload_dataset(
-        self,
-    ) -> pd.DataFrame:
-        return self.dataset_repository.reload()
+    def reload_dataset(self) -> None:
+        """Rebuild the persistent DuckDB dataset from the source CSV."""
+        self.dataset_store.reload()
 
     def _global_kpis(
         self,
-        dataframe: pd.DataFrame,
     ) -> AnalysisResult:
-        result = self.analysis_service.calculate_kpis(
-            dataframe
+        result = (
+            self.analysis_repository
+            .calculate_kpis()
         )
 
         summary = (
@@ -120,7 +126,6 @@ class DataAnalysisService:
 
     def _grouped_defect_rate(
         self,
-        dataframe: pd.DataFrame,
         dimension: str | None,
     ) -> AnalysisResult:
         if dimension is None:
@@ -130,9 +135,8 @@ class DataAnalysisService:
             )
 
         result = (
-            self.analysis_service
+            self.analysis_repository
             .calculate_defect_rate_by(
-                dataframe,
                 dimension=dimension,
             )
         )
@@ -162,13 +166,10 @@ class DataAnalysisService:
 
     def _monthly_trend(
         self,
-        dataframe: pd.DataFrame,
     ) -> AnalysisResult:
         result = (
-            self.analysis_service
-            .calculate_monthly_trend(
-                dataframe
-            )
+            self.analysis_repository
+            .calculate_monthly_trend()
         )
 
         if not result:
