@@ -82,21 +82,21 @@ def store(
     )
 
 
-def test_initialize_creates_persistent_database(
+def test_reload_creates_persistent_database(
     store: DuckDBDatasetStore,
 ) -> None:
     assert store.is_initialized() is False
 
-    store.initialize()
+    store.reload()
 
     assert store.database_path.exists()
     assert store.is_initialized() is True
 
 
-def test_initialize_persists_cleaned_dataset(
+def test_reload_persists_cleaned_dataset(
     store: DuckDBDatasetStore,
 ) -> None:
-    store.initialize()
+    store.reload()
 
     connection = duckdb.connect(
         str(store.database_path),
@@ -140,29 +140,11 @@ def test_initialize_persists_cleaned_dataset(
     ]
 
 
-def test_initialize_is_idempotent(
-    store: DuckDBDatasetStore,
-) -> None:
-    store.initialize()
-
-    first_modified_time = (
-        store.database_path.stat().st_mtime_ns
-    )
-
-    store.initialize()
-
-    second_modified_time = (
-        store.database_path.stat().st_mtime_ns
-    )
-
-    assert second_modified_time == first_modified_time
-
-
 def test_reload_replaces_existing_dataset(
     store: DuckDBDatasetStore,
     source_csv: Path,
 ) -> None:
-    store.initialize()
+    store.reload()
 
     replacement = pd.read_csv(source_csv)
     replacement = replacement.iloc[[0]].copy()
@@ -202,7 +184,7 @@ def test_reload_failure_preserves_existing_dataset(
     store: DuckDBDatasetStore,
     source_csv: Path,
 ) -> None:
-    store.initialize()
+    store.reload()
 
     source_csv.unlink()
 
@@ -227,3 +209,46 @@ def test_reload_failure_preserves_existing_dataset(
         connection.close()
 
     assert result == (2,)
+
+
+def test_reload_requires_preparation_dependencies(
+    tmp_path: Path,
+) -> None:
+    store = DuckDBDatasetStore(
+        database_path=tmp_path / "test.duckdb",
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "Dataset preparation requires both "
+            "a DataLoader and a DataCleaner"
+        ),
+    ):
+        store.reload()
+
+    assert store.database_path.exists() is False
+
+
+def test_is_initialized_returns_false_when_database_is_missing(
+    tmp_path: Path,
+) -> None:
+    store = DuckDBDatasetStore(
+        database_path=tmp_path / "missing.duckdb",
+    )
+
+    assert store.is_initialized() is False
+
+
+def test_readiness_check_does_not_require_preparation_dependencies(
+    store: DuckDBDatasetStore,
+) -> None:
+    store.reload()
+
+    readiness_store = DuckDBDatasetStore(
+        database_path=store.database_path,
+    )
+
+    assert readiness_store.loader is None
+    assert readiness_store.cleaner is None
+    assert readiness_store.is_initialized() is True

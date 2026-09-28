@@ -10,18 +10,6 @@ from app.models.analysis import (
 from app.services.data_analysis_service import DataAnalysisService
 
 
-class FakeDatasetStore:
-    def __init__(self) -> None:
-        self.initialize_calls = 0
-        self.reload_calls = 0
-
-    def initialize(self) -> None:
-        self.initialize_calls += 1
-
-    def reload(self) -> None:
-        self.reload_calls += 1
-
-
 class FakeAnalysisRepository:
     def __init__(self) -> None:
         self.kpi_calls = 0
@@ -113,11 +101,9 @@ def build_service(
     tmp_path: Path,
 ) -> tuple[
     DataAnalysisService,
-    FakeDatasetStore,
     FakeAnalysisRepository,
     FakeChartService,
 ]:
-    dataset_store = FakeDatasetStore()
     analysis_repository = FakeAnalysisRepository()
 
     chart_service = FakeChartService(
@@ -126,14 +112,12 @@ def build_service(
     )
 
     service = DataAnalysisService(
-        dataset_store=dataset_store,
         analysis_repository=analysis_repository,
         chart_service=chart_service,
     )
 
     return (
         service,
-        dataset_store,
         analysis_repository,
         chart_service,
     )
@@ -144,7 +128,6 @@ def test_execute_global_kpis_returns_expected_result(
 ) -> None:
     (
         service,
-        dataset_store,
         repository,
         _,
     ) = build_service(tmp_path)
@@ -171,7 +154,6 @@ def test_execute_global_kpis_returns_expected_result(
     assert "1,000 units" in result.summary
     assert "2.00%" in result.summary
 
-    assert dataset_store.initialize_calls == 1
     assert repository.kpi_calls == 1
 
 
@@ -180,7 +162,6 @@ def test_execute_grouped_defect_rate_returns_expected_result(
 ) -> None:
     (
         service,
-        dataset_store,
         repository,
         _,
     ) = build_service(tmp_path)
@@ -204,8 +185,6 @@ def test_execute_grouped_defect_rate_returns_expected_result(
     assert "Line 3" in result.summary
     assert "3.00%" in result.summary
 
-    assert dataset_store.initialize_calls == 1
-
     assert repository.grouped_calls == [
         "production_line"
     ]
@@ -216,7 +195,6 @@ def test_execute_grouped_defect_rate_requires_dimension(
 ) -> None:
     (
         service,
-        dataset_store,
         repository,
         _,
     ) = build_service(tmp_path)
@@ -231,7 +209,6 @@ def test_execute_grouped_defect_rate_requires_dimension(
             analysis_type="grouped_defect_rate"
         )
 
-    assert dataset_store.initialize_calls == 1
     assert repository.grouped_calls == []
 
 
@@ -240,7 +217,6 @@ def test_execute_monthly_trend_returns_chart_url(
 ) -> None:
     (
         service,
-        dataset_store,
         repository,
         chart_service,
     ) = build_service(tmp_path)
@@ -268,7 +244,6 @@ def test_execute_monthly_trend_returns_chart_url(
         in result.summary
     )
 
-    assert dataset_store.initialize_calls == 1
     assert repository.monthly_calls == 1
     assert chart_service.create_calls == 1
 
@@ -278,7 +253,6 @@ def test_execute_raises_error_for_unsupported_analysis_type(
 ) -> None:
     (
         service,
-        dataset_store,
         _,
         _,
     ) = build_service(tmp_path)
@@ -291,15 +265,12 @@ def test_execute_raises_error_for_unsupported_analysis_type(
             analysis_type="unsupported",
         )
 
-    assert dataset_store.initialize_calls == 1
 
-
-def test_multiple_analyses_reuse_persistent_dataset(
+def test_multiple_analyses_use_repository_without_dataset_initialization(
     tmp_path: Path,
 ) -> None:
     (
         service,
-        dataset_store,
         repository,
         _,
     ) = build_service(tmp_path)
@@ -317,7 +288,6 @@ def test_multiple_analyses_reuse_persistent_dataset(
         analysis_type="monthly_trend"
     )
 
-    assert dataset_store.initialize_calls == 3
     assert repository.kpi_calls == 1
 
     assert repository.grouped_calls == [
@@ -325,33 +295,3 @@ def test_multiple_analyses_reuse_persistent_dataset(
     ]
 
     assert repository.monthly_calls == 1
-
-
-def test_reload_dataset_rebuilds_persistent_dataset(
-    tmp_path: Path,
-) -> None:
-    (
-        service,
-        dataset_store,
-        _,
-        _,
-    ) = build_service(tmp_path)
-
-    service.reload_dataset()
-
-    assert dataset_store.reload_calls == 1
-
-
-def test_initialize_dataset_delegates_to_store(
-    tmp_path: Path,
-) -> None:
-    (
-        service,
-        dataset_store,
-        _,
-        _,
-    ) = build_service(tmp_path)
-
-    service.initialize_dataset()
-
-    assert dataset_store.initialize_calls == 1

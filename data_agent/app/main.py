@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api.routes import router
 from app.core.config import settings
 from app.services.chart_cleanup_service import ChartCleanupService
+from app.services.duckdb_dataset_store import DuckDBDatasetStore
 
 chart_cleanup_service = ChartCleanupService(
     charts_directory=settings.charts_directory,
@@ -17,6 +18,20 @@ chart_cleanup_service = ChartCleanupService(
         * 60
     ),
 )
+
+
+def validate_analytical_database() -> None:
+    """Fail fast unless the analytical database was prepared beforehand."""
+    dataset_store = DuckDBDatasetStore(
+        database_path=settings.database_path,
+    )
+
+    if not dataset_store.is_initialized():
+        raise RuntimeError(
+            "Analytical database is not initialized. "
+            "Run 'python -m app.commands.prepare_database' "
+            "before starting the Data Agent."
+        )
 
 
 async def run_chart_cleanup_loop() -> None:
@@ -39,6 +54,10 @@ async def lifespan(
 ) -> AsyncIterator[None]:
     """Manage startup and shutdown resources for the Data Agent."""
     del app
+
+    await asyncio.to_thread(
+        validate_analytical_database
+    )
 
     settings.charts_directory.mkdir(
         parents=True,

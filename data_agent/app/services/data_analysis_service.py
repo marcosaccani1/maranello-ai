@@ -3,13 +3,8 @@ from typing import Literal
 from app.core.config import settings
 from app.models.analysis import AnalysisResult
 from app.services.chart_service import ChartService
-from app.services.data_cleaner import DataCleaner
-from app.services.data_loader import DataLoader
 from app.services.duckdb_analysis_repository import (
     DuckDBAnalysisRepository,
-)
-from app.services.duckdb_dataset_store import (
-    DuckDBDatasetStore,
 )
 from app.services.question_interpreter import QuestionInterpreter
 
@@ -21,24 +16,14 @@ AnalysisType = Literal[
 
 
 class DataAnalysisService:
+    """Execute analytics against a pre-built DuckDB dataset."""
+
     def __init__(
         self,
-        dataset_store: DuckDBDatasetStore | None = None,
         analysis_repository: DuckDBAnalysisRepository | None = None,
         chart_service: ChartService | None = None,
         question_interpreter: QuestionInterpreter | None = None,
     ) -> None:
-        self.dataset_store = (
-            dataset_store
-            or DuckDBDatasetStore(
-                database_path=settings.database_path,
-                loader=DataLoader(
-                    settings.dataset_path
-                ),
-                cleaner=DataCleaner(),
-            )
-        )
-
         self.analysis_repository = (
             analysis_repository
             or DuckDBAnalysisRepository(
@@ -58,10 +43,6 @@ class DataAnalysisService:
             or QuestionInterpreter()
         )
 
-    def initialize_dataset(self) -> None:
-        """Ensure the persistent DuckDB dataset is available."""
-        self.dataset_store.initialize()
-
     def analyze_question(
         self,
         question: str,
@@ -80,8 +61,6 @@ class DataAnalysisService:
         analysis_type: AnalysisType,
         dimension: str | None = None,
     ) -> AnalysisResult:
-        self.initialize_dataset()
-
         if analysis_type == "global_kpis":
             return self._global_kpis()
 
@@ -96,10 +75,6 @@ class DataAnalysisService:
         raise ValueError(
             f"Unsupported analysis type: {analysis_type}"
         )
-
-    def reload_dataset(self) -> None:
-        """Rebuild the persistent DuckDB dataset from the source CSV."""
-        self.dataset_store.reload()
 
     def _global_kpis(
         self,

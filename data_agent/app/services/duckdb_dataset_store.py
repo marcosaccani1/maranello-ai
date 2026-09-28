@@ -7,34 +7,28 @@ from app.services.data_loader import DataLoader
 
 
 class DuckDBDatasetStore:
-    """Persist the prepared manufacturing dataset in DuckDB."""
+    """Persist and validate the prepared manufacturing dataset in DuckDB."""
 
     TABLE_NAME = "manufacturing_data"
 
     def __init__(
         self,
         database_path: Path,
-        loader: DataLoader,
-        cleaner: DataCleaner,
+        loader: DataLoader | None = None,
+        cleaner: DataCleaner | None = None,
     ) -> None:
         self.database_path = database_path
         self.loader = loader
         self.cleaner = cleaner
 
-    def initialize(self) -> None:
-        """Create the persistent dataset only when it is not initialized."""
-        self.database_path.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        if self.is_initialized():
-            return
-
-        self.reload()
-
     def reload(self) -> None:
-        """Reload and atomically replace the prepared DuckDB dataset."""
+        """Rebuild the persistent DuckDB dataset from the source CSV."""
+        if self.loader is None or self.cleaner is None:
+            raise RuntimeError(
+                "Dataset preparation requires both "
+                "a DataLoader and a DataCleaner."
+            )
+
         dataframe = self.cleaner.clean(
             self.loader.load()
         )

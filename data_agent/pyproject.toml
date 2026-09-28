@@ -45,4 +45,12 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.setuptools]
-packages = ["app", "app.api", "app.core", "app.models", "app.services", "app.utils"]
+packages = [
+    "app",
+    "app.api",
+    "app.commands",
+    "app.core",
+    "app.models",
+    "app.services",
+    "app.utils",
+]

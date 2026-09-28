@@ -1,19 +1,12 @@
+from app.commands.prepare_database import prepare_database
 from app.core.config import settings
-from app.services.data_cleaner import DataCleaner
-from app.services.data_loader import DataLoader
 from app.services.duckdb_analysis_repository import (
     DuckDBAnalysisRepository,
 )
-from app.services.duckdb_dataset_store import DuckDBDatasetStore
 
 
 def build_repository() -> DuckDBAnalysisRepository:
-    store = DuckDBDatasetStore(
-        database_path=settings.database_path,
-        loader=DataLoader(settings.dataset_path),
-        cleaner=DataCleaner(),
-    )
-    store.initialize()
+    prepare_database()
 
     return DuckDBAnalysisRepository(
         settings.database_path
