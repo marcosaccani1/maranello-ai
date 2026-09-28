@@ -611,11 +611,12 @@ The Python Data Agent is an independent FastAPI microservice responsible for str
 
 Its responsibilities include:
 
-- loading and preparing the Manufacturing Dataset;
-- cleaning known data-quality issues;
-- materializing the prepared dataset into a local DuckDB database;
+- preparing the Manufacturing Dataset through an explicit pre-worker command;
+- cleaning known data-quality issues with Pandas during database preparation;
+- materializing the prepared dataset into a local DuckDB database before workers start;
+- validating at worker startup that the analytical database has already been prepared;
 - interpreting supported analytical requests;
-- calculating manufacturing KPIs through deterministic DuckDB queries;
+- calculating manufacturing KPIs through deterministic read-only DuckDB queries;
 - executing grouped analyses;
 - calculating monthly trends;
 - generating analytical summaries;
@@ -630,9 +631,11 @@ The service uses:
     DuckDB
     Matplotlib
 
-The analytical data layer is divided into two explicit responsibilities:
+The analytical data layer is divided into an explicit preparation phase and a separate runtime query phase:
 
     CSV source dataset
+          ↓
+    python -m app.commands.prepare_database
           ↓
     DataLoader
           ↓
@@ -640,21 +643,25 @@ The analytical data layer is divided into two explicit responsibilities:
           ↓
     Prepared Pandas DataFrame
           ↓
-    DuckDBDatasetStore
+    DuckDBDatasetStore.reload()
           ↓
     Local DuckDB database
           ↓
+    FastAPI worker startup
+          ↓
+    Read-only readiness validation
+          ↓
     DuckDBAnalysisRepository
           ↓
-    Deterministic analytical queries
+    Deterministic read-only analytical queries
 
-`DuckDBDatasetStore` owns creation and refresh of the local analytical database. The source CSV remains the reproducible project data source, while the generated DuckDB database is a rebuildable runtime artifact.
+The explicit preparation command owns creation and refresh of the local analytical database through `DuckDBDatasetStore`. The source CSV remains the reproducible project data source, while the generated DuckDB database is a rebuildable runtime artifact.
 
-`DuckDBAnalysisRepository` owns query-oriented KPI, grouped and monthly analytical operations.
+FastAPI workers do not lazily initialize or rebuild the analytical database. They validate its readiness at startup and then use `DuckDBAnalysisRepository` for query-oriented KPI, grouped and monthly analytical operations through read-only DuckDB connections.
 
 Pandas therefore remains part of the deterministic ingestion and cleaning pipeline, while DuckDB is the primary analytical query engine.
 
-This design introduces a clear storage/query boundary and avoids using a complete prepared Pandas DataFrame as the primary in-memory analytical runtime.
+This design introduces a clear preparation/query boundary, avoids using a complete prepared Pandas DataFrame as the primary in-memory analytical runtime and prevents concurrent workers from competing to initialize the same DuckDB file.
 
 The Data Agent does not depend on the LLM to calculate numerical results.
 
@@ -1390,9 +1397,10 @@ The recommended startup order is:
     1. Activate Python environment
     2. Start ChromaDB
     3. Ensure the Knowledge Base is indexed
-    4. Start Python Data Agent
-    5. Start Node.js Backend
-    6. Start React Frontend
+    4. Prepare the DuckDB analytical database
+    5. Start Python Data Agent
+    6. Start Node.js Backend
+    7. Start React Frontend
 
 Starting the infrastructure dependencies first makes service availability easier to verify before launching the user-facing application.
 
@@ -1547,9 +1555,21 @@ Enter the Data Agent directory:
 
     cd data_agent
 
-Start the FastAPI application using Uvicorn:
+Before starting any FastAPI worker, prepare the persistent analytical database:
+
+    python -m app.commands.prepare_database
+
+This command loads and cleans the source CSV with the deterministic Pandas pipeline and materializes the prepared dataset into DuckDB.
+
+The preparation command must complete before the Data Agent is started. It is executed once before worker startup rather than independently by each worker, preventing concurrent processes from attempting to initialize the same DuckDB database.
+
+After preparation succeeds, start the FastAPI application using Uvicorn:
 
     uvicorn app.main:app --host 127.0.0.1 --port 8001
+
+At startup, the worker performs a read-only readiness validation. If the analytical database has not been prepared, startup fails fast with an explicit instruction to run the preparation command.
+
+For a multi-worker deployment, run `python -m app.commands.prepare_database` once before launching the worker processes.
 
 The service should become available at:
 
@@ -1660,6 +1680,8 @@ In addition:
     [ ] Knowledge Base is indexed
 
     [ ] Manufacturing Dataset is available
+
+    [ ] DuckDB analytical database has been prepared before Data Agent startup
 
     [ ] Browser can reach the React application
 
@@ -2799,8 +2821,10 @@ The automated suite covers areas including:
 - grouped and monthly analyses;
 - chart generation;
 - API behavior;
-- DuckDB dataset creation and refresh;
+- explicit pre-worker DuckDB dataset preparation and refresh;
 - persistence of the prepared analytical schema in DuckDB;
+- fail-fast worker startup when the analytical database is not prepared;
+- read-only readiness validation without preparation dependencies;
 - deterministic KPI queries through `DuckDBAnalysisRepository`;
 - grouped analytical queries;
 - monthly analytical queries;
@@ -3253,9 +3277,11 @@ Persistent distributed conversation storage is therefore considered a future enh
 
 The Python Data Agent uses DuckDB as its embedded analytical storage and query layer.
 
-The source CSV remains the reproducible source dataset. Deterministic preparation is performed through `DataLoader`, `DataCleaner` and Pandas, after which `DuckDBDatasetStore` materializes the prepared records into a local DuckDB database.
+The source CSV remains the reproducible source dataset. Deterministic preparation is executed explicitly before worker startup through `python -m app.commands.prepare_database`. The command uses `DataLoader`, `DataCleaner`, Pandas and `DuckDBDatasetStore.reload()` to materialize the prepared records into a local DuckDB database.
 
-Supported KPI, grouped and monthly analyses are executed through `DuckDBAnalysisRepository` rather than by querying a complete prepared DataFrame held as the primary analytical runtime.
+FastAPI workers do not own dataset initialization. At startup they perform only a read-only readiness validation and fail fast if the database has not been prepared. Supported KPI, grouped and monthly analyses are then executed through `DuckDBAnalysisRepository` using read-only DuckDB connections rather than by querying a complete prepared DataFrame held as the primary analytical runtime.
+
+Separating preparation from worker startup prevents multiple worker processes from competing to initialize or replace the same embedded database.
 
 The generated DuckDB database is a rebuildable runtime artifact and is not committed to the repository.
 
@@ -4007,6 +4033,8 @@ The clean-clone validation confirmed the complete setup workflow:
           ↓
     Index Knowledge Base
           ↓
+    Prepare DuckDB Analytical Database
+          ↓
     Start Python Data Agent
           ↓
     Start Node.js Backend
@@ -4022,6 +4050,7 @@ The clean environment successfully verified:
 - Python 3.12 Data Agent environment creation;
 - ChromaDB CLI installation and local server startup;
 - Knowledge Base ingestion with 5 documents and 149 indexed chunks;
+- explicit DuckDB analytical database preparation before Data Agent startup;
 - Python Data Agent health and analytical execution;
 - Node.js Backend health and orchestration;
 - React conversational interface;
@@ -4046,11 +4075,11 @@ The final quality checks executed successfully include:
     Production build
 
     Python Data Agent
-    80 automated tests
+    86 automated tests
     Ruff verification
 
     Automated Backend + Data Agent baseline
-    200 tests
+    206 tests
 
 During clean-clone validation, the setup documentation was also improved to explicitly verify the Python interpreter version and document the ChromaDB CLI installation procedure.
 

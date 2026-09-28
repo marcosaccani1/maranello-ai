@@ -16,11 +16,12 @@ The Data Agent does not independently decide whether a request should use RAG or
 
 The Data Agent is responsible for:
 
-- loading the synthetic Manufacturing Dataset from CSV when the analytical database must be initialized or refreshed;
-- applying deterministic data-cleaning rules;
-- materializing the prepared dataset into a local DuckDB database;
+- preparing the synthetic Manufacturing Dataset from CSV through an explicit pre-worker command;
+- applying deterministic data-cleaning rules with Pandas during database preparation;
+- materializing the prepared dataset into a local DuckDB database before workers start;
+- validating at worker startup that the analytical database has already been prepared;
 - interpreting supported analytical questions;
-- calculating manufacturing KPIs through deterministic DuckDB queries;
+- calculating manufacturing KPIs through deterministic read-only DuckDB queries;
 - performing grouped analyses;
 - calculating monthly defect-rate trends;
 - generating chart images when required;
@@ -57,9 +58,11 @@ The Data Agent follows the high-level flow:
           ↓
     Structured Analysis Response
 
-The analytical database is prepared through a separate storage lifecycle:
+The analytical database is prepared once before the FastAPI workers are started:
 
     Source CSV
+        ↓
+    python -m app.commands.prepare_database
         ↓
     DataLoader
         ↓
@@ -67,11 +70,17 @@ The analytical database is prepared through a separate storage lifecycle:
         ↓
     Prepared Pandas DataFrame
         ↓
-    DuckDBDatasetStore
+    DuckDBDatasetStore.reload()
         ↓
     Local DuckDB database
+        ↓
+    FastAPI worker startup
+        ↓
+    Read-only readiness validation
+        ↓
+    Runtime analytical queries
 
-This separation keeps dataset preparation, analytical querying and application orchestration as distinct responsibilities.
+Dataset preparation is therefore separated from the worker lifecycle. Workers never lazily initialize or rebuild the DuckDB database. This prevents multiple worker processes from competing to materialize the same local database during concurrent startup.
 
 The main application components are located under:
 
@@ -82,6 +91,8 @@ The current structure includes:
     app/
     ├── api/
     │   └── routes.py
+    ├── commands/
+    │   └── prepare_database.py
     ├── core/
     │   └── config.py
     ├── models/
@@ -125,11 +136,13 @@ The local analytical database is stored by default at:
 
 The database is a runtime artifact and is excluded from Git.
 
-Its lifecycle is managed by `DuckDBDatasetStore`.
+Its materialization lifecycle is managed by `DuckDBDatasetStore`, while the explicit `prepare_database` command owns the pre-worker preparation step.
 
 When the database must be created or refreshed, the preparation pipeline is:
 
     Manufacturing CSV
+          ↓
+    python -m app.commands.prepare_database
           ↓
     DataLoader
           ↓
@@ -137,15 +150,19 @@ When the database must be created or refreshed, the preparation pipeline is:
           ↓
     Prepared Pandas DataFrame
           ↓
-    DuckDBDatasetStore
+    DuckDBDatasetStore.reload()
           ↓
     DuckDB analytical table
 
+The preparation command is executed before FastAPI workers are started. At worker startup, the application performs only a read-only readiness check and fails fast if the analytical database has not been prepared.
+
+Normal analytical requests never load or clean the source CSV and never rebuild the DuckDB database. `DuckDBAnalysisRepository` opens read-only connections for analytical execution.
+
 The source CSV therefore remains the reproducible project data source, while DuckDB acts as the local query-oriented representation used by the analytical runtime.
 
-This design avoids keeping the complete prepared analytical dataset as the primary in-memory query layer and allows filtering and aggregation to be executed directly by DuckDB.
+This design avoids keeping the complete prepared analytical dataset as the primary in-memory query layer and prevents concurrent workers from attempting to initialize the same DuckDB file.
 
-The DuckDB file can be rebuilt from the source dataset through the deterministic preparation pipeline.
+The DuckDB file can be rebuilt explicitly from the source dataset through the deterministic preparation command.
 
 The database is intentionally treated as a generated local artifact rather than a source-controlled project asset.
 
@@ -291,7 +308,9 @@ Receives an analytical natural-language question and returns a structured analys
 
 The request is processed by `DataAnalysisService`.
 
-The service interprets the analytical request, ensures that the DuckDB analytical dataset is available and delegates supported calculations to `DuckDBAnalysisRepository`.
+The service interprets the analytical request and delegates supported calculations to `DuckDBAnalysisRepository`. It does not initialize, reload or rebuild the analytical database.
+
+Database preparation is a separate pre-worker operation. Worker startup validates that the DuckDB analytical dataset already exists and is ready before the service begins accepting analytical traffic.
 
 Validation and supported analytical behavior are defined by the Data Agent models, interpreter and deterministic analytical services.
 
@@ -398,9 +417,19 @@ The root project README contains the complete clean-clone installation sequence 
 
 # Running the Service
 
-From the `data_agent` directory, with the Python environment activated, start the service with:
+From the `data_agent` directory, with the Python environment activated, first prepare the persistent analytical database:
+
+    python -m app.commands.prepare_database
+
+This command loads and cleans the source CSV and materializes the prepared dataset into the local DuckDB database.
+
+Database preparation must complete before FastAPI workers are started. The workers do not initialize the database themselves; they perform a read-only readiness check at startup and fail fast when the database is missing or unprepared.
+
+After preparation succeeds, start the service with:
 
     uvicorn app.main:app --host 127.0.0.1 --port 8001
+
+For multi-worker deployments, the same rule applies: run the preparation command once before starting the worker processes.
 
 The default local Data Agent address is therefore:
 

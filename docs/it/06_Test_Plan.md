@@ -884,8 +884,12 @@ Le verifiche hanno l'obiettivo di assicurare che:
 
 - la sorgente CSV venga caricata e preparata correttamente;
 - le anomalie previste vengano gestite durante il cleaning;
-- il dataset preparato venga materializzato correttamente in DuckDB;
-- le query analitiche utilizzino il datastore preparato;
+- il dataset preparato venga materializzato correttamente in DuckDB prima dell'avvio dei worker;
+- il comando di preparazione ricostruisca e validi esplicitamente il datastore;
+- i worker verifichino in sola lettura la readiness del database già preparato;
+- un worker fallisca in modalità fail-fast quando il datastore non è disponibile;
+- nessun worker o normale request path esegua inizializzazione o rebuild lazy del database;
+- le query analitiche utilizzino connessioni DuckDB read-only verso il datastore preparato;
 - i KPI siano calcolati correttamente;
 - le aggregazioni siano coerenti;
 - le richieste supportate vengano interpretate correttamente;
@@ -946,19 +950,47 @@ Un obiettivo importante è evitare che il cleaning nasconda automaticamente tutt
 
 Quando un dato non può essere corretto in modo affidabile, il sistema deve trattarlo in maniera esplicita invece di inventare un valore.
 
-La pipeline di preparazione utilizza Pandas come rappresentazione transitoria. Il dataset pulito viene successivamente materializzato da `DuckDBDatasetStore` nella tabella DuckDB `manufacturing_data`, che costituisce la rappresentazione analitica interrogata durante le normali richieste.
+La pipeline di preparazione utilizza Pandas come rappresentazione transitoria. Il dataset pulito viene materializzato da `DuckDBDatasetStore` nella tabella DuckDB `manufacturing_data` attraverso un comando esplicito eseguito prima dell'avvio dei worker.
 
-Le verifiche distinguono quindi:
+Le verifiche distinguono quindi tre fasi:
+
+    PRE-WORKER PREPARATION
 
     Source CSV
+       ↓
+    python -m app.commands.prepare_database
        ↓
     DataLoader
        ↓
     DataCleaner + Pandas
        ↓
-    DuckDBDatasetStore
+    DuckDBDatasetStore.reload()
        ↓
     DuckDB manufacturing_data
+
+    WORKER STARTUP
+
+    FastAPI Worker
+       ↓
+    DuckDBDatasetStore(database_path only)
+       ↓
+    is_initialized()
+       ↓
+    Read-only readiness validation
+       ↓
+    Start service / Fail fast
+
+    REQUEST RUNTIME
+
+    POST /api/analysis
+       ↓
+    DataAnalysisService
+       ↓
+    DuckDBAnalysisRepository
+       ↓
+    Read-only DuckDB queries
+
+La separazione tra preparazione e runtime impedisce che più worker concorrenti tentino di inizializzare o sostituire contemporaneamente lo stesso database DuckDB embedded.
 
 ---
 
@@ -2870,9 +2902,14 @@ Per la verifica completa vengono avviati:
 La sequenza operativa consigliata è:
 
     1. ChromaDB
-    2. Python Data Agent
-    3. Node.js Backend
-    4. React Frontend
+    2. Knowledge Base già indicizzata in ChromaDB
+    3. Preparazione del database analitico DuckDB
+       python -m app.commands.prepare_database
+    4. Python Data Agent
+    5. Node.js Backend
+    6. React Frontend
+
+La preparazione DuckDB viene eseguita una sola volta prima dell'avvio dei worker FastAPI. I worker non caricano il CSV, non eseguono il cleaning e non ricostruiscono il datastore: durante lo startup verificano esclusivamente in sola lettura che il database sia già pronto.
 
 Prima dei test applicativi vengono verificati gli health endpoint dei servizi disponibili.
 
@@ -3661,7 +3698,7 @@ Il Python Data Agent dispone di una suite automatizzata dedicata.
 
 Risultato finale verificato:
 
-    Tests:      79
+    Tests:      86
     Result:     PASS
 
 Il controllo statico del codice Python è stato inoltre eseguito tramite Ruff:
@@ -3669,7 +3706,7 @@ Il controllo statico del codice Python è stato inoltre eseguito tramite Ruff:
     ruff check app tests
     Result: PASS
 
-Le verifiche automatiche coprono il comportamento analitico, il lifecycle del datastore DuckDB e i miglioramenti introdotti durante il ciclo di hardening.
+Le verifiche automatiche coprono il comportamento analitico, la preparazione esplicita del datastore DuckDB, la readiness dei worker e i miglioramenti introdotti durante il ciclo di hardening.
 
 | Area | Esito |
 |------|-------|
@@ -3683,11 +3720,16 @@ Le verifiche automatiche coprono il comportamento analitico, il lifecycle del da
 | Unsupported combination handling | PASS |
 | Chart generation | PASS |
 | Health endpoint | PASS |
-| DuckDB database initialization | PASS |
+| Explicit pre-worker database preparation | PASS |
 | Cleaned dataset persistence | PASS |
-| Idempotent dataset initialization | PASS |
 | Explicit DuckDB dataset reload | PASS |
 | Failed reload preserves existing dataset | PASS |
+| Preparation dependency validation | PASS |
+| Readiness check without preparation dependencies | PASS |
+| Missing database readiness detection | PASS |
+| Worker startup readiness validation | PASS |
+| Fail-fast startup for unprepared database | PASS |
+| Database validation before chart lifecycle startup | PASS |
 | Valid defect-row filtering for rates | PASS |
 | Null handling in analytical averages | PASS |
 | Zero valid-production handling | PASS |
@@ -3695,25 +3737,39 @@ Le verifiche automatiche coprono il comportamento analitico, il lifecycle del da
 | Grouping-dimension whitelist | PASS |
 | Monthly trend ordering | PASS |
 | Missing-date handling | PASS |
-| Persistent dataset reuse | PASS |
+| Read-only analytical access | PASS |
 | Chart retention | PASS |
 | Startup chart cleanup | PASS |
 | Periodic chart cleanup lifecycle | PASS |
 | Cleanup limited to managed PNG pattern | PASS |
 
-### DuckDBDatasetStore
+### Pre-worker database preparation
 
-I test verificano il lifecycle della rappresentazione analitica persistente del Manufacturing Dataset.
+La suite verifica il comando responsabile della preparazione esplicita del database prima dell'avvio dei worker.
 
 In particolare viene verificato che:
 
-- `initialize()` crei il database DuckDB persistente quando necessario;
-- il dataset caricato e pulito venga materializzato correttamente nella tabella analitica;
-- l'inizializzazione sia idempotente;
-- `reload()` sostituisca esplicitamente il dataset persistente;
-- un reload fallito preservi il dataset precedentemente disponibile.
+- `prepare_database()` utilizzi il datastore configurato;
+- il comando esegua `reload()` per ricostruire esplicitamente il dataset analitico dalla sorgente CSV;
+- al termine della materializzazione venga verificata la readiness del datastore;
+- la preparazione fallisca in modo controllato se il database risultante non è valido;
+- `build_dataset_store()` utilizzi i path configurati e fornisca `DataLoader` e `DataCleaner`.
 
-Questi test verificano direttamente il confine tra la preparazione del dataset tramite `DataLoader` e `DataCleaner` e la sua materializzazione nel datastore DuckDB.
+### DuckDBDatasetStore
+
+I test verificano il boundary di materializzazione e validazione della rappresentazione analitica persistente del Manufacturing Dataset.
+
+In particolare viene verificato che:
+
+- `reload()` crei il database DuckDB persistente durante la fase esplicita di preparazione;
+- il dataset caricato e pulito venga materializzato correttamente nella tabella analitica;
+- un nuovo `reload()` sostituisca esplicitamente il dataset persistente;
+- un reload fallito preservi il dataset precedentemente disponibile;
+- `reload()` richieda esplicitamente le dipendenze di preparazione `DataLoader` e `DataCleaner`;
+- `is_initialized()` restituisca `False` quando il database non esiste;
+- la readiness possa essere verificata senza fornire le dipendenze di preparazione.
+
+Non viene testata alcuna inizializzazione lazy perché tale percorso non fa parte dell'architettura corrente.
 
 Il database generato è un artefatto runtime locale e ricostruibile a partire dalla sorgente CSV; non costituisce quindi una sorgente dati versionata nel repository.
 
@@ -3738,7 +3794,7 @@ Le connessioni utilizzate dal repository per le normali analisi sono read-only e
 
 ### DataAnalysisService
 
-I test del servizio applicativo verificano l'integrazione tra interpretazione della richiesta, lifecycle del dataset, repository analitico e generazione dei grafici.
+I test del servizio applicativo verificano l'integrazione tra interpretazione della richiesta, repository analitico e generazione dei grafici.
 
 Sono coperti:
 
@@ -3747,11 +3803,22 @@ Sono coperti:
 - dimensione obbligatoria per le analisi grouped;
 - trend mensile con chart URL;
 - rifiuto dei tipi di analisi non supportati;
-- riutilizzo del datastore persistente tra analisi successive;
-- ricostruzione esplicita del datastore tramite reload;
-- delega dell'inizializzazione a `DuckDBDatasetStore`.
+- utilizzo del repository analitico per analisi successive senza inizializzazione o rebuild del dataset.
 
-Questa separazione permette di verificare indipendentemente preparazione e persistenza del dataset, query analitiche e coordinamento applicativo.
+`DataAnalysisService` non possiede responsabilità di preparazione, inizializzazione o reload del datastore. Tali operazioni appartengono esclusivamente alla fase esplicita pre-worker.
+
+### FastAPI startup readiness
+
+I test di integrazione del lifecycle FastAPI verificano che:
+
+- un database già preparato venga accettato;
+- un database non preparato provochi un errore di startup;
+- la validazione del database avvenga prima del lifecycle di cleanup dei grafici;
+- un fallimento della readiness interrompa lo startup prima dell'attivazione dei servizi runtime;
+- health endpoint e lifecycle dei grafici continuino a funzionare quando il datastore è pronto;
+- il task periodico di cleanup venga cancellato correttamente allo shutdown.
+
+La validazione utilizza `DuckDBDatasetStore` con il solo `database_path` e non dispone quindi delle dipendenze necessarie a ricostruire il database.
 
 ### ChartCleanupService
 
@@ -3776,7 +3843,7 @@ Durante l'esecuzione finale della suite è stato inoltre osservato un singolo `S
 
 Il warning non rappresenta un test fallito e non modifica l'esito della suite:
 
-    79 passed
+    86 passed
 
 ---
 
@@ -3787,16 +3854,16 @@ La baseline finale verificata delle suite Backend e Python Data Agent è:
 | Componente | Test superati |
 |------------|--------------:|
 | Node.js Backend | 120 |
-| Python Data Agent | 79 |
-| **Totale** | **199** |
+| Python Data Agent | 86 |
+| **Totale** | **206** |
 
 Il risultato complessivo è quindi:
 
-    Automated tests: 199
+    Automated tests: 206
     Failed tests:      0
     Result:          PASS
 
-I 199 test automatizzati coprono congiuntamente:
+I 206 test automatizzati coprono congiuntamente:
 
 - orchestrazione AI;
 - function calling;
@@ -4744,25 +4811,34 @@ Queste caratteristiche non sono necessarie per la versione dimostrativa corrente
 
 Il Manufacturing Dataset utilizza un CSV locale come sorgente riproducibile dei dati.
 
-Durante la preparazione, `DataLoader` e `DataCleaner` utilizzano Pandas per caricamento, normalizzazione e cleaning. Il dataset preparato viene quindi materializzato da `DuckDBDatasetStore` in un database DuckDB locale, mentre `DuckDBAnalysisRepository` esegue le query analitiche direttamente sul datastore embedded.
+Durante una fase esplicita pre-worker, `DataLoader` e `DataCleaner` utilizzano Pandas per caricamento, normalizzazione e cleaning. `DuckDBDatasetStore.reload()` materializza quindi il dataset preparato in un database DuckDB locale prima che i worker FastAPI vengano avviati.
 
-Per il dataset dimostrativo di circa 2.000 record, DuckDB non è necessario per ragioni di capacità. La scelta introduce invece un confine architetturale esplicito tra preparazione dei dati, persistenza analitica e query, evitando di utilizzare un DataFrame condiviso in memoria come datastore analitico dell'applicazione.
+Durante lo startup ogni worker esegue soltanto una verifica read-only della readiness del datastore. Le normali richieste utilizzano `DuckDBAnalysisRepository`, che esegue le query analitiche direttamente sul database già preparato attraverso connessioni read-only.
+
+Per il dataset dimostrativo di circa 2.000 record, DuckDB non è necessario per ragioni di capacità. La scelta introduce invece un confine architetturale esplicito tra preparazione dei dati, persistenza analitica e query, evitando di utilizzare un DataFrame condiviso in memoria come datastore analitico dell'applicazione e impedendo che più worker concorrenti competano per la materializzazione dello stesso database embedded.
 
 Il flusso corrente è:
 
     Manufacturing CSV
           ↓
+    Explicit Pre-Worker Preparation
+    python -m app.commands.prepare_database
+          ↓
     DataLoader
           ↓
     DataCleaner + Pandas
           ↓
-    DuckDBDatasetStore
+    DuckDBDatasetStore.reload()
           ↓
     Local DuckDB
           ↓
+    FastAPI Worker Startup
+          ↓
+    Read-only Readiness Validation
+          ↓
     DuckDBAnalysisRepository
           ↓
-    Deterministic Queries
+    Read-only Deterministic Queries
 
 In presenza di volumi, concorrenza, frequenza di aggiornamento o requisiti di governance significativamente superiori, il layer analitico potrebbe evolvere verso:
 
@@ -5055,12 +5131,14 @@ Il dataset preparato viene materializzato da `DuckDBDatasetStore` nella tabella 
 
 `DuckDBDatasetStore`:
 
-- inizializza il database locale quando necessario;
-- materializza il dataset preparato con schema esplicito;
+- materializza il dataset preparato con schema esplicito esclusivamente durante la preparazione esplicita;
 - utilizza una tabella di staging durante il rebuild;
-- sostituisce il dataset analitico in modo transazionale;
-- permette un reload esplicito;
-- preserva il datastore precedentemente valido se il reload fallisce.
+- sostituisce il dataset analitico in modo transazionale tramite `reload()`;
+- preserva il datastore precedentemente valido se il reload fallisce;
+- consente una verifica di readiness senza richiedere `DataLoader` o `DataCleaner`;
+- non espone un percorso di inizializzazione lazy ai worker o alle normali richieste.
+
+Il comando `python -m app.commands.prepare_database` costituisce il preparation writer e viene eseguito una sola volta prima dell'avvio dei worker. I worker operano invece come runtime reader: validano il database già preparato allo startup e lo interrogano in sola lettura durante le analisi.
 
 `DuckDBAnalysisRepository`:
 
@@ -5170,9 +5248,12 @@ Il requisito fondamentale di routing autonomo è quindi soddisfatto.
 | CSV loading | PASS |
 | Data preparation e cleaning tramite Pandas | PASS |
 | DuckDB embedded analytical datastore | PASS |
+| Explicit pre-worker database preparation | PASS |
 | DuckDBDatasetStore | PASS |
-| Persistent dataset initialization | PASS |
 | Transactional dataset reload | PASS |
+| Read-only worker readiness validation | PASS |
+| Fail-fast startup without prepared database | PASS |
+| No lazy worker initialization | PASS |
 | DuckDBAnalysisRepository | PASS |
 | Deterministic DuckDB queries | PASS |
 | Grouping-dimension whitelist | PASS |
@@ -5183,7 +5264,7 @@ Il requisito fondamentale di routing autonomo è quindi soddisfatto.
 | Chart generation | PASS |
 | Narrative result integration | PASS |
 
-L'approccio deterministico implementato soddisfa il ruolo richiesto al componente analitico mantenendo separati preparazione dei dati, persistenza analitica e query. Pandas viene utilizzato per caricamento e cleaning, mentre DuckDB costituisce il datastore analitico embedded interrogato attraverso operazioni controllate.
+L'approccio deterministico implementato soddisfa il ruolo richiesto al componente analitico mantenendo separati preparazione dei dati, persistenza analitica e query. Pandas viene utilizzato per caricamento e cleaning durante la preparazione esplicita pre-worker, mentre DuckDB costituisce il datastore analitico embedded già materializzato che i worker validano e interrogano in sola lettura. Nessun worker esegue inizializzazione o rebuild lazy del database.
 
 ---
 
@@ -5260,9 +5341,9 @@ La baseline finale di verifica automatizzata comprende:
 La baseline automatizzata verificata è quindi:
 
     Backend:     120 passed
-    Data Agent:   79 passed
+    Data Agent:   86 passed
     ----------------------
-    Total:       199 passed
+    Total:       206 passed
 
 Per il Backend risultano inoltre superati:
 

@@ -2619,14 +2619,14 @@ Questa separazione mantiene distinta la produzione dei fatti numerici dalla gene
 
 Il Data Agent è responsabile di:
 
-- caricamento del Manufacturing Dataset CSV;
-- data cleaning e normalizzazione tramite Pandas;
+- preparazione esplicita pre-worker del Manufacturing Dataset CSV;
+- data cleaning e normalizzazione tramite Pandas durante la fase di preparazione;
 - gestione dei record duplicati;
 - gestione delle anomalie previste nel dataset;
-- materializzazione del dataset preparato in DuckDB;
-- lifecycle e reload del datastore analitico locale;
+- materializzazione del dataset preparato in DuckDB prima dell'avvio dei worker;
+- validazione read-only del datastore analitico durante l'avvio dei worker;
 - interpretazione della richiesta analitica;
-- esecuzione di query analitiche deterministiche tramite DuckDB;
+- esecuzione di query analitiche deterministiche read-only tramite DuckDB;
 - calcolo dei KPI;
 - aggregazioni per dimensione;
 - analisi temporali;
@@ -3083,12 +3083,15 @@ Il Manufacturing Dataset utilizza una pipeline separata tra preparazione dei dat
 
 Il CSV costituisce la sorgente riproducibile e versionata del progetto.
 
-La preparazione viene eseguita attraverso:
+La preparazione viene eseguita esplicitamente prima dell'avvio dei worker attraverso:
 
+- `python -m app.commands.prepare_database`, comando responsabile dell'avvio della fase di preparazione;
 - `DataLoader`, responsabile del caricamento del CSV;
 - `DataCleaner`, responsabile della pipeline deterministica di cleaning;
 - Pandas, utilizzato come rappresentazione transitoria durante caricamento, normalizzazione e preparazione;
-- `DuckDBDatasetStore`, responsabile della materializzazione e del lifecycle del dataset analitico persistente locale.
+- `DuckDBDatasetStore.reload()`, responsabile della materializzazione transazionale del dataset analitico persistente locale.
+
+La verifica di readiness è invece separata dalla preparazione: durante l'avvio del servizio, ciascun worker controlla in sola lettura che il database DuckDB sia già disponibile e valido, senza caricare il CSV e senza ricostruire il datastore.
 
 La pipeline di cleaning comprende:
 
@@ -3108,32 +3111,47 @@ La preparazione viene applicata in modo deterministico e riproducibile.
 
 Il lifecycle può essere sintetizzato come:
 
+    PREPARATION PHASE
+
     Source CSV
+        |
+        v
+    python -m app.commands.prepare_database
         |
         v
     DataLoader
         |
         v
-    DataCleaner
+    DataCleaner + Pandas
         |
         v
-    Prepared Pandas DataFrame
-        |
-        v
-    DuckDBDatasetStore
+    DuckDBDatasetStore.reload()
         |
         v
     DuckDB manufacturing_data
 
-`DuckDBDatasetStore.initialize()` verifica la disponibilità del datastore analitico locale e ne esegue la costruzione quando necessario.
+    WORKER STARTUP
+
+    Pre-built DuckDB
+        |
+        v
+    DuckDBDatasetStore.is_initialized()
+        |
+        +--> ready ----> start worker
+        |
+        +--> not ready -> fail fast
+
+La costruzione del database non è quindi lazy e non appartiene al lifecycle dei worker. `DuckDBDatasetStore` non espone più un metodo `initialize()` che possa ricostruire automaticamente il datastore durante il runtime.
 
 La materializzazione utilizza una tabella di staging con schema esplicito. Il DataFrame preparato viene registrato temporaneamente nella connessione DuckDB e copiato nella rappresentazione analitica persistente.
 
 Il database DuckDB è un artefatto runtime locale e rigenerabile e non sostituisce il CSV come sorgente del progetto.
 
-`reload()` consente di ricostruire esplicitamente il dataset analitico a partire dalla sorgente CSV.
+`reload()` viene utilizzato dal comando esplicito di preparazione per ricostruire il dataset analitico a partire dalla sorgente CSV.
 
 La ricostruzione viene gestita transazionalmente: se caricamento, cleaning o materializzazione falliscono, la transazione viene annullata e il dataset analitico precedentemente disponibile rimane utilizzabile.
+
+Questa separazione evita che più worker avviati contemporaneamente tentino di inizializzare o sostituire lo stesso file DuckDB.
 
 ---
 
@@ -3141,13 +3159,14 @@ La ricostruzione viene gestita transazionalmente: se caricamento, cleaning o mat
 
 Il file CSV sorgente viene trattato come input in sola lettura.
 
-Il Data Agent:
+Il Data Agent separa esplicitamente preparazione e runtime:
 
-- legge il CSV attraverso `DataLoader` durante inizializzazione o reload;
-- prepara e normalizza i dati tramite `DataCleaner` e Pandas;
-- materializza il dataset preparato nella tabella DuckDB `manufacturing_data`;
-- esegue le normali richieste analitiche attraverso `DuckDBAnalysisRepository`;
-- non modifica il file CSV sorgente durante le analisi.
+- il comando `python -m app.commands.prepare_database` legge il CSV attraverso `DataLoader`;
+- durante la preparazione, `DataCleaner` e Pandas normalizzano i dati;
+- `DuckDBDatasetStore.reload()` materializza il dataset preparato nella tabella DuckDB `manufacturing_data`;
+- durante l'avvio, i worker eseguono soltanto una verifica read-only della disponibilità del datastore;
+- durante le normali richieste, `DuckDBAnalysisRepository` esegue query read-only sul database già preparato;
+- il file CSV sorgente non viene modificato durante la preparazione o le analisi.
 
 Il runtime analitico è quindi:
 
@@ -3170,7 +3189,7 @@ Il runtime analitico è quindi:
 
 Le connessioni utilizzate dal repository per le query analitiche sono aperte in modalità read-only.
 
-Le normali richieste `POST /api/analysis` non ricostruiscono il dataset e non eseguono nuovamente il cleaning del CSV.
+Le normali richieste `POST /api/analysis` non inizializzano, non ricostruiscono e non eseguono il reload del dataset, né ripetono il cleaning del CSV. `DataAnalysisService` opera esclusivamente sul datastore già preparato attraverso `DuckDBAnalysisRepository`.
 
 Il datastore DuckDB introduce persistenza analitica locale embedded, ma rimane un artefatto rigenerabile. Non rappresenta una persistenza distribuita e non sostituisce la sorgente CSV versionata.
 
@@ -4173,8 +4192,8 @@ La baseline corrente verificata comprende:
 | Componente | Test superati |
 |------------|---------------|
 | Node.js Backend | 120 |
-| Python Data Agent | 79 |
-| **Totale** | **199** |
+| Python Data Agent | 86 |
+| **Totale** | **206** |
 
 Per il backend Node.js la suite è distribuita su:
 
@@ -4206,15 +4225,15 @@ I test del layer analitico verificano separatamente il lifecycle del dataset e l
 
 I test di `DuckDBDatasetStore` coprono scenari quali:
 
-- inizializzazione del database DuckDB locale;
+- creazione esplicita del database DuckDB locale tramite reload;
 - caricamento e cleaning della sorgente CSV;
 - materializzazione del dataset preparato;
 - persistenza dei valori normalizzati;
 - conversione dei valori non validi secondo le regole di cleaning;
-- inizializzazione idempotente;
-- reload esplicito;
 - sostituzione del dataset esistente dopo un reload valido;
-- preservazione del datastore precedente quando un reload fallisce.
+- preservazione del datastore precedente quando un reload fallisce;
+- errore controllato quando viene richiesto un reload senza le dipendenze di preparazione;
+- verifica read-only dello stato del database senza dipendenze di preparazione.
 
 I test di `DuckDBAnalysisRepository` verificano invece:
 
@@ -4230,7 +4249,9 @@ I test di `DuckDBAnalysisRepository` verificano invece:
 - comportamento in assenza di date valide;
 - errore controllato quando il database DuckDB non è disponibile.
 
-I test di `DataAnalysisService` verificano inoltre che più richieste analitiche possano utilizzare il datastore persistente senza ripetere caricamento e cleaning del CSV a ogni analisi e che le operazioni di inizializzazione e reload vengano delegate correttamente al dataset store.
+I test di `DataAnalysisService` verificano inoltre che più richieste analitiche utilizzino direttamente il repository DuckDB senza attivare alcuna inizializzazione o ricostruzione del dataset.
+
+Test dedicati al comando `prepare_database` verificano che la preparazione esegua esplicitamente il reload e validi il datastore risultante. I test del lifecycle FastAPI verificano invece che la readiness del database venga controllata prima dell'avvio delle attività runtime e che un database non preparato provochi un fail-fast prima che il worker inizi a servire traffico.
 
 ---
 
@@ -4506,26 +4527,33 @@ Il percorso corrente è:
     Manufacturing CSV
          |
          v
+    Explicit pre-worker preparation
+    python -m app.commands.prepare_database
+         |
+         v
     DataLoader
          |
          v
     DataCleaner + Pandas
          |
          v
-    DuckDBDatasetStore
+    DuckDBDatasetStore.reload()
          |
          v
     Local DuckDB
          |
          v
+    FastAPI worker readiness check
+         |
+         v
     DuckDBAnalysisRepository
          |
          v
-    Deterministic Analytical Queries
+    Read-only deterministic analytical queries
 
 Per il Manufacturing Dataset del progetto, composto da circa 2.000 record nella sorgente CSV, DuckDB non è necessario per ragioni di capacità.
 
-La scelta è architetturale: introduce un boundary query-oriented, evita di utilizzare un DataFrame condiviso come datastore analitico, rende persistente localmente il dataset preparato e separa il lifecycle di preparazione dalle normali richieste analitiche.
+La scelta è architetturale: introduce un boundary query-oriented, evita di utilizzare un DataFrame condiviso come datastore analitico, rende persistente localmente il dataset preparato e separa il lifecycle di preparazione sia dalle normali richieste analitiche sia dall'inizializzazione dei worker. La preparazione viene completata una volta prima dell'avvio dei processi FastAPI, che successivamente operano in lettura sul datastore già pronto.
 
 DuckDB permette inoltre di mantenere un deployment embedded semplice e offre un percorso naturale verso workload tabellari più ampi e formati analitici come Parquet.
 
@@ -4720,9 +4748,9 @@ In questo scenario la retention potrebbe essere delegata al servizio di storage 
 
 ## 16.11 Dataset refresh automatizzato
 
-`DuckDBDatasetStore` espone un meccanismo esplicito di `reload()` che ricostruisce il datastore analitico a partire dalla sorgente CSV.
+`DuckDBDatasetStore` espone un meccanismo esplicito di `reload()` utilizzato dal comando `python -m app.commands.prepare_database` per ricostruire il datastore analitico a partire dalla sorgente CSV.
 
-La versione corrente non implementa un refresh automatico del Manufacturing Dataset.
+La versione corrente non implementa un refresh automatico del Manufacturing Dataset e i worker non invocano `reload()` durante startup o request processing.
 
 In uno scenario con dati aggiornati dinamicamente si potrebbero introdurre:
 
@@ -4738,7 +4766,9 @@ Qualunque strategia dovrebbe preservare la proprietà corrente del reload transa
 
 ## 16.12 Scalabilità orizzontale
 
-Per aumentare il numero di utenti concorrenti potrebbero essere introdotti:
+La preparazione del database DuckDB è già separata dall'avvio dei worker: il datastore viene costruito una volta prima di avviare i processi FastAPI, che effettuano soltanto una verifica di readiness e utilizzano connessioni analitiche read-only. Questo elimina la race di inizializzazione che si verificherebbe se ogni worker tentasse di costruire autonomamente il database embedded.
+
+Per aumentare ulteriormente il numero di utenti concorrenti potrebbero essere introdotti:
 
 - più backend instance;
 - più Data Agent instance;
@@ -4747,7 +4777,7 @@ Per aumentare il numero di utenti concorrenti potrebbero essere introdotti:
 - storage grafici condiviso;
 - metriche e tracing distribuiti.
 
-Questa evoluzione richiederebbe di rivedere le componenti che oggi mantengono stato locale al processo.
+Un deployment realmente distribuito su più host richiederebbe comunque di rivalutare gli artefatti locali, perché il DuckDB embedded e lo storage dei grafici non costituiscono storage condiviso tra macchine differenti.
 
 ---
 
