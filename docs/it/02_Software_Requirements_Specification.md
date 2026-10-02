@@ -337,7 +337,7 @@ I grafici generati dal Data Agent vengono resi disponibili al Frontend attravers
 Il corretto funzionamento completo del sistema assume che:
 
 - il Manufacturing Dataset sia disponibile localmente al Python Data Agent;
-- il database analitico DuckDB sia stato preparato esplicitamente dal Manufacturing Dataset prima dell'avvio dei worker del Data Agent;
+- il database analitico DuckDB sia stato preparato automaticamente dal Manufacturing Dataset prima dell'avvio dei worker del Data Agent;
 - la Knowledge Base sia disponibile nel repository;
 - i documenti siano stati indicizzati nella collection ChromaDB configurata;
 - ChromaDB sia in esecuzione e raggiungibile dal Backend;
@@ -411,9 +411,9 @@ Il servizio analitico utilizza:
 
 Il Data Agent deve utilizzare il Manufacturing Dataset CSV come fonte riproducibile dei dati analitici.
 
-Pandas viene utilizzato per il caricamento e il cleaning deterministico durante una fase esplicita di preparazione pre-worker, mentre il dataset preparato viene materializzato in DuckDB per l'esecuzione delle query analitiche.
+Pandas viene utilizzato per il caricamento e il cleaning deterministico durante una fase di preparazione pre-worker separata dal runtime, mentre il dataset preparato viene materializzato in DuckDB per l'esecuzione delle query analitiche.
 
-La preparazione del database deve essere completata prima dell'avvio dei worker FastAPI. I worker devono verificare la readiness del datastore senza caricare il CSV, eseguire il cleaning o ricostruire il database.
+Il normale avvio del Data Agent deve orchestrare automaticamente la preparazione del database prima della creazione dei worker FastAPI. La preparazione deve completarsi con successo prima che il processo di avvio possa creare i worker; in caso di fallimento non deve essere avviato alcun worker. I worker devono verificare la readiness del datastore senza caricare il CSV, eseguire il cleaning o ricostruire il database.
 
 L'analisi deve essere controllata e deterministica.
 
@@ -1156,10 +1156,10 @@ Il servizio espone inoltre un health check utilizzabile per verificarne la dispo
 |-------|--------|
 | Priorità | Must Have |
 | Attore | Python Data Agent |
-| Descrizione | Il Data Agent deve fornire una fase esplicita di preparazione pre-worker che utilizzi il Manufacturing Dataset CSV come fonte riproducibile e materializzi il dataset preparato nel layer analitico DuckDB. |
+| Descrizione | Il Data Agent deve fornire una fase di preparazione pre-worker che utilizzi il Manufacturing Dataset CSV come fonte riproducibile e materializzi il dataset preparato nel layer analitico DuckDB. Il normale launcher del servizio deve orchestrare automaticamente questa fase prima dell'avvio dei worker. |
 | Input | Manufacturing Dataset |
 | Output | Dataset preparato e disponibile nel layer analitico DuckDB |
-| Criterio di accettazione | Prima dell'avvio dei worker, il dataset viene caricato e pulito deterministicamente tramite Pandas e materializzato correttamente nel database DuckDB locale. I worker non eseguono materializzazione lazy del datastore. |
+| Criterio di accettazione | Durante il normale startup, il dataset viene caricato e pulito deterministicamente tramite Pandas e materializzato correttamente nel database DuckDB locale prima della creazione dei worker. La preparazione viene eseguita una sola volta dal launcher indipendentemente dal numero di worker configurati; se fallisce, nessun worker viene avviato. I worker non eseguono materializzazione lazy del datastore. |
 
 La versione finale del dataset contiene:
 
@@ -1648,10 +1648,10 @@ La containerizzazione non costituisce un requisito della versione corrente.
 | Campo | Valore |
 |-------|--------|
 | Priorità | Must Have |
-| Descrizione | La materializzazione del datastore DuckDB deve essere separata dal lifecycle dei worker del Python Data Agent. |
-| Criterio di accettazione | Il database viene preparato esplicitamente prima dell'avvio dei worker; ciascun worker esegue soltanto una verifica read-only di readiness e le richieste analitiche non caricano, puliscono o rimaterializzano il CSV. |
+| Descrizione | La materializzazione del datastore DuckDB deve essere separata dal lifecycle dei worker del Python Data Agent e deve completarsi prima della loro creazione. |
+| Criterio di accettazione | Il launcher del servizio prepara automaticamente il database una sola volta prima di avviare i worker; ciascun worker esegue soltanto una verifica read-only di readiness e le richieste analitiche non caricano, puliscono o rimaterializzano il CSV. Un fallimento della preparazione impedisce l'avvio dei worker. |
 
-Questo requisito impedisce che più worker concorrenti tentino di inizializzare o sostituire contemporaneamente lo stesso database DuckDB embedded.
+Questo requisito stabilisce un confine temporale tra il preparation writer e i runtime reader, impedendo che più worker concorrenti tentino di inizializzare o sostituire lo stesso database DuckDB embedded mentre viene utilizzato per le analisi.
 
 ---
 

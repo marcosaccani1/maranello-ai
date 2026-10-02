@@ -1459,13 +1459,13 @@ Il percorso di esecuzione di una richiesta analitica è:
 
 `DuckDBDatasetStore` costituisce il boundary responsabile della materializzazione e della validazione del dataset analitico persistente.
 
-La fase di scrittura è esplicita e precede l'avvio dei worker: il comando `python -m app.commands.prepare_database` utilizza `DataLoader` e `DataCleaner` per costruire un DataFrame Pandas preparato e `DuckDBDatasetStore.reload()` lo materializza nella tabella DuckDB `manufacturing_data`.
+La fase di scrittura è esplicita ma viene orchestrata automaticamente dal normale launcher del servizio. Il comando `python -m app.commands.start_data_agent` invoca `prepare_database()` prima di avviare Uvicorn. La preparazione utilizza `DataLoader` e `DataCleaner` per costruire un DataFrame Pandas preparato e `DuckDBDatasetStore.reload()` lo materializza nella tabella DuckDB `manufacturing_data`.
 
-Durante l'avvio dei worker, `DuckDBDatasetStore` viene invece utilizzato senza dipendenze di preparazione per verificare in sola lettura che il database sia già disponibile. Un datastore non preparato provoca un fail-fast e non una ricostruzione lazy.
+Solo dopo il completamento della preparazione il launcher invoca Uvicorn con il numero di worker configurato. Durante l'avvio, ciascun worker utilizza `DuckDBDatasetStore` senza dipendenze di preparazione per verificare in sola lettura che il database sia già disponibile. Un datastore non preparato provoca un fail-fast e non una ricostruzione lazy.
 
 `DuckDBAnalysisRepository` costituisce il boundary di query e incapsula le operazioni analitiche supportate dal servizio attraverso connessioni DuckDB read-only.
 
-La separazione tra preparation writer e runtime reader evita che ogni richiesta debba rileggere e ripulire il CSV, impedisce alla logica applicativa di dipendere direttamente da un DataFrame condiviso in memoria e rimuove la possibilità che più worker concorrenti tentino di inizializzare lo stesso database embedded.
+La separazione temporale tra preparation writer e runtime reader evita che ogni richiesta debba rileggere e ripulire il CSV, impedisce alla logica applicativa di dipendere direttamente da un DataFrame condiviso in memoria e garantisce che il writer completi la materializzazione prima che vengano creati i processi worker che interrogano il database embedded.
 
 ---
 
@@ -1499,26 +1499,30 @@ La risposta può contenere:
 
 Il Manufacturing Dataset CSV rimane la fonte riproducibile dei dati utilizzati dal progetto.
 
-La preparazione del dataset viene eseguita tramite un comando esplicito prima dell'avvio dei worker, mentre `DuckDBDatasetStore` mantiene separate le operazioni di materializzazione e readiness validation.
+La preparazione del dataset costituisce una fase pre-worker distinta dal runtime, ma il normale startup la orchestra automaticamente attraverso `python -m app.commands.start_data_agent`. `DuckDBDatasetStore` mantiene separate le operazioni di materializzazione e readiness validation.
 
 Il processo è il seguente:
 
-1. `python -m app.commands.prepare_database` avvia la preparazione;
-2. `DataLoader` carica il CSV sorgente;
-3. `DataCleaner` applica le regole deterministiche di normalizzazione e cleaning;
-4. viene prodotto un DataFrame Pandas preparato;
-5. `DuckDBDatasetStore.reload()` registra temporaneamente il DataFrame nella connessione DuckDB;
-6. i dati vengono materializzati con schema esplicito nella tabella di staging;
-7. la tabella `manufacturing_data` viene sostituita transazionalmente;
-8. dopo la preparazione vengono avviati i worker FastAPI;
-9. ogni worker verifica in sola lettura la readiness del database tramite `is_initialized()`;
-10. le richieste analitiche interrogano direttamente DuckDB attraverso `DuckDBAnalysisRepository` con connessioni read-only.
+1. `python -m app.commands.start_data_agent` avvia il launcher del servizio;
+2. il launcher risolve il numero di worker configurato;
+3. `prepare_database()` avvia una singola preparazione prima della creazione dei worker;
+4. `DataLoader` carica il CSV sorgente;
+5. `DataCleaner` applica le regole deterministiche di normalizzazione e cleaning;
+6. viene prodotto un DataFrame Pandas preparato;
+7. `DuckDBDatasetStore.reload()` registra temporaneamente il DataFrame nella connessione DuckDB;
+8. i dati vengono materializzati con schema esplicito nella tabella di staging e `manufacturing_data` viene sostituita transazionalmente;
+9. la readiness del datastore preparato viene verificata;
+10. soltanto dopo il successo della preparazione il launcher invoca Uvicorn con il numero di worker configurato;
+11. ogni worker verifica in sola lettura la readiness del database tramite `is_initialized()`;
+12. le richieste analitiche interrogano direttamente DuckDB attraverso `DuckDBAnalysisRepository` con connessioni read-only.
+
+Se la preparazione fallisce, il launcher non invoca Uvicorn e nessun worker viene creato. La preparazione viene quindi eseguita una sola volta indipendentemente dal numero di worker configurati.
 
 Il database DuckDB è un artefatto runtime locale e rigenerabile: non sostituisce il CSV come fonte del progetto e non viene versionato nel repository Git.
 
-Non esiste un percorso di inizializzazione lazy nel worker o durante `POST /api/analysis`. Se il datastore non è pronto, il worker fallisce durante lo startup indicando che deve essere eseguito il comando di preparazione.
+Non esiste un percorso di inizializzazione lazy nel worker o durante `POST /api/analysis`. Se un worker rileva comunque un datastore non pronto durante la propria validazione difensiva di startup, il worker fallisce senza tentare una ricostruzione.
 
-`reload()` rimane l'operazione di scrittura esplicita utilizzata dal comando di preparazione per ricostruire il layer analitico a partire dal CSV sorgente.
+`reload()` rimane l'operazione di scrittura esplicita utilizzata dalla fase di preparazione per ricostruire il layer analitico a partire dal CSV sorgente. Il comando standalone `python -m app.commands.prepare_database` rimane disponibile per operazioni esplicite di manutenzione o rebuild senza avviare il servizio.
 
 La sostituzione della tabella è transazionale: se il caricamento, il cleaning o la materializzazione falliscono, viene eseguito il rollback e la tabella precedentemente disponibile non viene sostituita da uno stato parziale.
 
@@ -2002,7 +2006,7 @@ Durante la progettazione e l'implementazione sono state adottate decisioni archi
 | ADR-014 | Dependency-aware error handling | Distinguere errori applicativi da indisponibilità di ChromaDB o Data Agent e restituire `503 Service Unavailable`. |
 | ADR-015 | Runtime chart files esclusi dal version control | Evitare la presenza nel repository di artefatti generati dinamicamente. |
 | ADR-016 | Environment-based configuration | Impedire l'hardcoding di API key, URL dei servizi e configurazioni sensibili. |
-| ADR-017 | Embedded DuckDB analytical layer with pre-worker preparation | Separare la preparazione Pandas dalle query analitiche, materializzare il dataset una sola volta prima dell'avvio dei worker, utilizzare readiness validation read-only allo startup e supportare ricostruzione esplicita e transazionale tramite reload. |
+| ADR-017 | Embedded DuckDB analytical layer with automated pre-worker preparation | Separare la preparazione Pandas dalle query analitiche, automatizzare la sequenza preparation-before-workers tramite il launcher del Data Agent, materializzare il dataset una sola volta indipendentemente dal numero di worker, utilizzare readiness validation read-only allo startup e supportare ricostruzione esplicita e transazionale tramite reload. |
 | ADR-018 | Bounded agentic tool loop | Limitare l'esecuzione autonoma a un massimo di cinque tool round, prevenendo loop indefiniti e consumo incontrollato di risorse. |
 | ADR-019 | Resilient inter-service HTTP | Applicare timeout, retry selettivi e backoff alle comunicazioni con il Data Agent tramite un meccanismo condiviso. |
 | ADR-020 | RAG relevance threshold | Filtrare i nearest neighbors con `maxDistance = 0.70` e consentire retrieval vuoti per query non sufficientemente pertinenti. |
@@ -2076,11 +2080,14 @@ DuckDB è stato introdotto come layer analitico embedded non perché il dataset 
 
 Il percorso corrente è:
 
-    Manufacturing CSV
+    python -m app.commands.start_data_agent
            |
            v
-    Explicit Pre-Worker Preparation
-    python -m app.commands.prepare_database
+    Automated Pre-Worker Preparation
+    prepare_database()
+           |
+           v
+    Manufacturing CSV
            |
            v
        DataLoader
@@ -2095,13 +2102,13 @@ Il percorso corrente è:
     DuckDBDatasetStore.reload()
            |
            v
-      Local DuckDB
+      Local DuckDB Ready
            |
            v
-    FastAPI Worker Startup
+    Uvicorn starts N workers
            |
            v
-    Read-Only Readiness Check
+    Per-worker Read-Only Readiness Check
            |
            v
     DuckDBAnalysisRepository
@@ -2117,10 +2124,13 @@ Questa architettura offre diversi vantaggi:
 - KPI, aggregazioni e trend vengono eseguiti direttamente in DuckDB;
 - le richieste analitiche non richiedono la rilettura e il cleaning del CSV;
 - il servizio non dipende da un DataFrame condiviso in memoria come datastore analitico;
+- il launcher completa il preparation writer prima di creare qualsiasi worker;
+- la preparazione viene eseguita una sola volta indipendentemente dal numero di worker configurati;
+- un fallimento della preparazione impedisce l'avvio dei worker;
 - i worker non possiedono un percorso di inizializzazione o rebuild lazy;
-- più worker possono validare e interrogare il datastore già preparato senza competere per la sua materializzazione;
+- più worker possono validare e interrogare contemporaneamente il datastore già preparato attraverso connessioni read-only senza competere per la sua materializzazione;
 - il boundary tra preparation writer e runtime reader è esplicito e testabile;
-- `reload()` consente al comando di preparazione di ricostruire transazionalmente il dataset analitico quando la sorgente deve essere aggiornata.
+- `reload()` consente alla fase di preparazione di ricostruire transazionalmente il dataset analitico quando la sorgente deve essere aggiornata.
 
 Per lo scope corrente, DuckDB mantiene inoltre un footprint infrastrutturale ridotto perché opera come database embedded locale e non richiede l'introduzione di un database server separato.
 

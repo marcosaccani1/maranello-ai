@@ -2619,12 +2619,12 @@ Questa separazione mantiene distinta la produzione dei fatti numerici dalla gene
 
 Il Data Agent è responsabile di:
 
-- preparazione esplicita pre-worker del Manufacturing Dataset CSV;
+- preparazione pre-worker del Manufacturing Dataset CSV orchestrata automaticamente dal normale launcher del servizio;
 - data cleaning e normalizzazione tramite Pandas durante la fase di preparazione;
 - gestione dei record duplicati;
 - gestione delle anomalie previste nel dataset;
-- materializzazione del dataset preparato in DuckDB prima dell'avvio dei worker;
-- validazione read-only del datastore analitico durante l'avvio dei worker;
+- materializzazione del dataset preparato in DuckDB una sola volta prima della creazione dei worker;
+- validazione read-only del datastore analitico durante l'avvio di ciascun worker;
 - interpretazione della richiesta analitica;
 - esecuzione di query analitiche deterministiche read-only tramite DuckDB;
 - calcolo dei KPI;
@@ -3083,15 +3083,16 @@ Il Manufacturing Dataset utilizza una pipeline separata tra preparazione dei dat
 
 Il CSV costituisce la sorgente riproducibile e versionata del progetto.
 
-La preparazione viene eseguita esplicitamente prima dell'avvio dei worker attraverso:
+Il normale startup del Data Agent orchestra automaticamente la preparazione prima della creazione dei worker attraverso:
 
-- `python -m app.commands.prepare_database`, comando responsabile dell'avvio della fase di preparazione;
+- `python -m app.commands.start_data_agent`, launcher responsabile della sequenza preparation-before-workers;
+- `prepare_database()`, invocato una sola volta dal launcher prima dell'avvio di Uvicorn;
 - `DataLoader`, responsabile del caricamento del CSV;
 - `DataCleaner`, responsabile della pipeline deterministica di cleaning;
 - Pandas, utilizzato come rappresentazione transitoria durante caricamento, normalizzazione e preparazione;
 - `DuckDBDatasetStore.reload()`, responsabile della materializzazione transazionale del dataset analitico persistente locale.
 
-La verifica di readiness è invece separata dalla preparazione: durante l'avvio del servizio, ciascun worker controlla in sola lettura che il database DuckDB sia già disponibile e valido, senza caricare il CSV e senza ricostruire il datastore.
+Soltanto dopo il completamento con successo della preparazione il launcher avvia Uvicorn con il numero di worker configurato. La verifica di readiness rimane separata dalla preparazione: ciascun worker controlla in sola lettura che il database DuckDB sia già disponibile e valido, senza caricare il CSV e senza ricostruire il datastore. Se la preparazione fallisce, Uvicorn non viene avviato e non viene creato alcun worker.
 
 La pipeline di cleaning comprende:
 
@@ -3130,28 +3131,37 @@ Il lifecycle può essere sintetizzato come:
         v
     DuckDB manufacturing_data
 
-    WORKER STARTUP
+    AUTOMATED SERVICE STARTUP
 
+    python -m app.commands.start_data_agent
+        |
+        v
+    prepare_database()
+        |
+        v
     Pre-built DuckDB
         |
         v
-    DuckDBDatasetStore.is_initialized()
+    Uvicorn starts N workers
         |
-        +--> ready ----> start worker
+        v
+    Per-worker DuckDBDatasetStore.is_initialized()
+        |
+        +--> ready ----> serve requests
         |
         +--> not ready -> fail fast
 
-La costruzione del database non è quindi lazy e non appartiene al lifecycle dei worker. `DuckDBDatasetStore` non espone più un metodo `initialize()` che possa ricostruire automaticamente il datastore durante il runtime.
+La costruzione del database non è quindi lazy e non appartiene al lifecycle dei worker. Il launcher completa il preparation writer prima di creare qualsiasi worker e la preparazione viene eseguita una sola volta indipendentemente dal numero di worker configurati. `DuckDBDatasetStore` non espone più un metodo `initialize()` che possa ricostruire automaticamente il datastore durante il runtime.
 
 La materializzazione utilizza una tabella di staging con schema esplicito. Il DataFrame preparato viene registrato temporaneamente nella connessione DuckDB e copiato nella rappresentazione analitica persistente.
 
 Il database DuckDB è un artefatto runtime locale e rigenerabile e non sostituisce il CSV come sorgente del progetto.
 
-`reload()` viene utilizzato dal comando esplicito di preparazione per ricostruire il dataset analitico a partire dalla sorgente CSV.
+`reload()` viene utilizzato dalla fase di preparazione per ricostruire il dataset analitico a partire dalla sorgente CSV. Il comando standalone `python -m app.commands.prepare_database` rimane disponibile per operazioni esplicite di manutenzione o rebuild senza avviare il servizio.
 
 La ricostruzione viene gestita transazionalmente: se caricamento, cleaning o materializzazione falliscono, la transazione viene annullata e il dataset analitico precedentemente disponibile rimane utilizzabile.
 
-Questa separazione evita che più worker avviati contemporaneamente tentino di inizializzare o sostituire lo stesso file DuckDB.
+Questa separazione stabilisce un confine temporale tra il preparation writer e i runtime reader: il writer completa la materializzazione prima che Uvicorn crei i worker, che successivamente utilizzano soltanto readiness validation e query read-only.
 
 ---
 
@@ -3161,9 +3171,10 @@ Il file CSV sorgente viene trattato come input in sola lettura.
 
 Il Data Agent separa esplicitamente preparazione e runtime:
 
-- il comando `python -m app.commands.prepare_database` legge il CSV attraverso `DataLoader`;
-- durante la preparazione, `DataCleaner` e Pandas normalizzano i dati;
+- il normale launcher `python -m app.commands.start_data_agent` invoca `prepare_database()` prima della creazione dei worker;
+- durante la preparazione, `DataLoader` legge il CSV e `DataCleaner` con Pandas normalizza i dati;
 - `DuckDBDatasetStore.reload()` materializza il dataset preparato nella tabella DuckDB `manufacturing_data`;
+- soltanto dopo il completamento della preparazione Uvicorn crea il numero di worker configurato;
 - durante l'avvio, i worker eseguono soltanto una verifica read-only della disponibilità del datastore;
 - durante le normali richieste, `DuckDBAnalysisRepository` esegue query read-only sul database già preparato;
 - il file CSV sorgente non viene modificato durante la preparazione o le analisi.
@@ -4192,8 +4203,8 @@ La baseline corrente verificata comprende:
 | Componente | Test superati |
 |------------|---------------|
 | Node.js Backend | 120 |
-| Python Data Agent | 86 |
-| **Totale** | **206** |
+| Python Data Agent | 91 |
+| **Totale** | **211** |
 
 Per il backend Node.js la suite è distribuita su:
 
@@ -4251,7 +4262,7 @@ I test di `DuckDBAnalysisRepository` verificano invece:
 
 I test di `DataAnalysisService` verificano inoltre che più richieste analitiche utilizzino direttamente il repository DuckDB senza attivare alcuna inizializzazione o ricostruzione del dataset.
 
-Test dedicati al comando `prepare_database` verificano che la preparazione esegua esplicitamente il reload e validi il datastore risultante. I test del lifecycle FastAPI verificano invece che la readiness del database venga controllata prima dell'avvio delle attività runtime e che un database non preparato provochi un fail-fast prima che il worker inizi a servire traffico.
+Test dedicati al comando `prepare_database` verificano che la preparazione esegua il reload e validi il datastore risultante. I test del launcher `start_data_agent` verificano inoltre che la preparazione venga eseguita una sola volta prima dell'avvio di Uvicorn, indipendentemente dal numero di worker configurati, e che un fallimento della preparazione impedisca completamente la creazione dei worker. Un test di integrazione multi-processo verifica che più worker possano interrogare contemporaneamente in sola lettura un database DuckDB già preparato, senza eseguire reload o materializzazione durante le letture. I test del lifecycle FastAPI verificano infine che la readiness del database venga controllata prima dell'avvio delle attività runtime e che un database non preparato provochi un fail-fast prima che il worker inizi a servire traffico.
 
 ---
 
@@ -4524,11 +4535,14 @@ Pandas viene utilizzato per caricamento, normalizzazione e cleaning della sorgen
 
 Il percorso corrente è:
 
-    Manufacturing CSV
+    python -m app.commands.start_data_agent
          |
          v
-    Explicit pre-worker preparation
-    python -m app.commands.prepare_database
+    Automated pre-worker preparation
+    prepare_database()
+         |
+         v
+    Manufacturing CSV
          |
          v
     DataLoader
@@ -4540,10 +4554,13 @@ Il percorso corrente è:
     DuckDBDatasetStore.reload()
          |
          v
-    Local DuckDB
+    Local DuckDB ready
          |
          v
-    FastAPI worker readiness check
+    Uvicorn starts N workers
+         |
+         v
+    Per-worker read-only readiness check
          |
          v
     DuckDBAnalysisRepository
@@ -4553,7 +4570,7 @@ Il percorso corrente è:
 
 Per il Manufacturing Dataset del progetto, composto da circa 2.000 record nella sorgente CSV, DuckDB non è necessario per ragioni di capacità.
 
-La scelta è architetturale: introduce un boundary query-oriented, evita di utilizzare un DataFrame condiviso come datastore analitico, rende persistente localmente il dataset preparato e separa il lifecycle di preparazione sia dalle normali richieste analitiche sia dall'inizializzazione dei worker. La preparazione viene completata una volta prima dell'avvio dei processi FastAPI, che successivamente operano in lettura sul datastore già pronto.
+La scelta è architetturale: introduce un boundary query-oriented, evita di utilizzare un DataFrame condiviso come datastore analitico, rende persistente localmente il dataset preparato e separa il lifecycle di preparazione sia dalle normali richieste analitiche sia dall'inizializzazione dei worker. Il normale launcher automatizza la sequenza e completa una singola preparazione prima di creare i processi FastAPI, che successivamente operano in lettura sul datastore già pronto.
 
 DuckDB permette inoltre di mantenere un deployment embedded semplice e offre un percorso naturale verso workload tabellari più ampi e formati analitici come Parquet.
 
@@ -4766,7 +4783,7 @@ Qualunque strategia dovrebbe preservare la proprietà corrente del reload transa
 
 ## 16.12 Scalabilità orizzontale
 
-La preparazione del database DuckDB è già separata dall'avvio dei worker: il datastore viene costruito una volta prima di avviare i processi FastAPI, che effettuano soltanto una verifica di readiness e utilizzano connessioni analitiche read-only. Questo elimina la race di inizializzazione che si verificherebbe se ogni worker tentasse di costruire autonomamente il database embedded.
+La preparazione del database DuckDB è separata dal lifecycle dei worker e viene orchestrata automaticamente dal launcher del Data Agent: il datastore viene costruito una sola volta prima che Uvicorn crei i processi FastAPI, che effettuano soltanto una verifica di readiness e utilizzano connessioni analitiche read-only. Questo elimina la race di inizializzazione che si verificherebbe se ogni worker tentasse di costruire autonomamente il database embedded.
 
 Per aumentare ulteriormente il numero di utenti concorrenti potrebbero essere introdotti:
 

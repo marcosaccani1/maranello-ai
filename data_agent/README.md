@@ -16,10 +16,11 @@ The Data Agent does not independently decide whether a request should use RAG or
 
 The Data Agent is responsible for:
 
-- preparing the synthetic Manufacturing Dataset from CSV through an explicit pre-worker command;
+- automatically preparing the synthetic Manufacturing Dataset from CSV before normal worker startup;
 - applying deterministic data-cleaning rules with Pandas during database preparation;
 - materializing the prepared dataset into a local DuckDB database before workers start;
-- validating at worker startup that the analytical database has already been prepared;
+- starting the configured FastAPI worker processes only after preparation succeeds;
+- validating at each worker startup that the analytical database has already been prepared;
 - interpreting supported analytical questions;
 - calculating manufacturing KPIs through deterministic read-only DuckDB queries;
 - performing grouped analyses;
@@ -58,11 +59,11 @@ The Data Agent follows the high-level flow:
           ↓
     Structured Analysis Response
 
-The analytical database is prepared once before the FastAPI workers are started:
+The normal startup path automatically prepares the analytical database once before any FastAPI worker is started:
 
-    Source CSV
+    python -m app.commands.start_data_agent
         ↓
-    python -m app.commands.prepare_database
+    Pre-worker preparation
         ↓
     DataLoader
         ↓
@@ -72,15 +73,15 @@ The analytical database is prepared once before the FastAPI workers are started:
         ↓
     DuckDBDatasetStore.reload()
         ↓
-    Local DuckDB database
+    Local DuckDB database ready
         ↓
-    FastAPI worker startup
+    Uvicorn starts configured worker processes
         ↓
-    Read-only readiness validation
+    Per-worker read-only readiness validation
         ↓
     Runtime analytical queries
 
-Dataset preparation is therefore separated from the worker lifecycle. Workers never lazily initialize or rebuild the DuckDB database. This prevents multiple worker processes from competing to materialize the same local database during concurrent startup.
+Dataset preparation remains separated from the worker lifecycle. The launcher completes the preparation phase before invoking Uvicorn, so no worker exists while the preparation writer is materializing the database. Workers never lazily initialize or rebuild DuckDB and use the prepared datastore only through read-only readiness checks and analytical queries.
 
 The main application components are located under:
 
@@ -92,7 +93,8 @@ The current structure includes:
     ├── api/
     │   └── routes.py
     ├── commands/
-    │   └── prepare_database.py
+    │   ├── prepare_database.py
+    │   └── start_data_agent.py
     ├── core/
     │   └── config.py
     ├── models/
@@ -136,13 +138,15 @@ The local analytical database is stored by default at:
 
 The database is a runtime artifact and is excluded from Git.
 
-Its materialization lifecycle is managed by `DuckDBDatasetStore`, while the explicit `prepare_database` command owns the pre-worker preparation step.
+Its materialization lifecycle is managed by `DuckDBDatasetStore`. During normal service startup, `start_data_agent` automatically invokes the deterministic preparation phase and waits for it to complete before Uvicorn is allowed to create any worker process.
 
-When the database must be created or refreshed, the preparation pipeline is:
+The normal startup pipeline is:
 
     Manufacturing CSV
           ↓
-    python -m app.commands.prepare_database
+    python -m app.commands.start_data_agent
+          ↓
+    prepare_database()
           ↓
     DataLoader
           ↓
@@ -152,9 +156,13 @@ When the database must be created or refreshed, the preparation pipeline is:
           ↓
     DuckDBDatasetStore.reload()
           ↓
-    DuckDB analytical table
+    DuckDB analytical table ready
+          ↓
+    Uvicorn worker startup
 
-The preparation command is executed before FastAPI workers are started. At worker startup, the application performs only a read-only readiness check and fails fast if the analytical database has not been prepared.
+The standalone `python -m app.commands.prepare_database` command remains available when an explicit database rebuild is required without starting the service.
+
+At worker startup, the application performs only a read-only readiness check and fails fast if the analytical database is unavailable or invalid.
 
 Normal analytical requests never load or clean the source CSV and never rebuild the DuckDB database. `DuckDBAnalysisRepository` opens read-only connections for analytical execution.
 
@@ -310,7 +318,7 @@ The request is processed by `DataAnalysisService`.
 
 The service interprets the analytical request and delegates supported calculations to `DuckDBAnalysisRepository`. It does not initialize, reload or rebuild the analytical database.
 
-Database preparation is a separate pre-worker operation. Worker startup validates that the DuckDB analytical dataset already exists and is ready before the service begins accepting analytical traffic.
+Database preparation is a separate pre-worker operation automatically orchestrated by the normal service launcher. The launcher completes preparation before Uvicorn creates the configured workers, and each worker then validates that the DuckDB analytical dataset already exists and is ready before accepting analytical traffic.
 
 Validation and supported analytical behavior are defined by the Data Agent models, interpreter and deterministic analytical services.
 
@@ -342,7 +350,7 @@ The service reads optional environment configuration from:
 
 Unknown environment variables are ignored.
 
-The current settings include configuration for:
+The current settings and startup environment include configuration for:
 
 - service identity and environment;
 - project paths;
@@ -350,7 +358,8 @@ The current settings include configuration for:
 - DuckDB database path;
 - generated-chart directory;
 - chart retention;
-- chart cleanup interval.
+- chart cleanup interval;
+- Data Agent worker count through `DATA_AGENT_WORKERS`.
 
 Default service values include:
 
@@ -374,7 +383,11 @@ Default chart lifecycle values are:
     chart_retention_hours = 24.0
     chart_cleanup_interval_minutes = 60.0
 
-The standard local project setup can use these defaults without adding Data Agent-specific variables to the root `.env`.
+The standard local project setup uses one Data Agent worker by default. The root `.env.example` exposes:
+
+    DATA_AGENT_WORKERS=1
+
+Set this value to a positive integer when multiple local worker processes are required. The launcher validates the value before database preparation and worker startup.
 
 ---
 
@@ -417,19 +430,30 @@ The root project README contains the complete clean-clone installation sequence 
 
 # Running the Service
 
-From the `data_agent` directory, with the Python environment activated, first prepare the persistent analytical database:
+From the `data_agent` directory, with the Python environment activated, start the service through the automated launcher:
+
+    python -m app.commands.start_data_agent
+
+The launcher performs the startup sequence deterministically:
+
+    1. validate the configured worker count;
+    2. load and clean the source CSV;
+    3. materialize the prepared dataset into DuckDB;
+    4. verify that preparation completed successfully;
+    5. invoke Uvicorn only after the writer phase has finished;
+    6. start the configured FastAPI worker processes.
+
+The default worker count is one. To run multiple workers, set `DATA_AGENT_WORKERS` to a positive integer, for example:
+
+    DATA_AGENT_WORKERS=3 python -m app.commands.start_data_agent
+
+Preparation still runs exactly once in the launcher process before Uvicorn is invoked. Individual workers never initialize or rebuild the database; they perform only a read-only readiness check before accepting analytical traffic.
+
+If preparation fails, Uvicorn is not started and therefore no worker process is created.
+
+For maintenance or an explicit database rebuild without starting the service, the preparation command remains available separately:
 
     python -m app.commands.prepare_database
-
-This command loads and cleans the source CSV and materializes the prepared dataset into the local DuckDB database.
-
-Database preparation must complete before FastAPI workers are started. The workers do not initialize the database themselves; they perform a read-only readiness check at startup and fail fast when the database is missing or unprepared.
-
-After preparation succeeds, start the service with:
-
-    uvicorn app.main:app --host 127.0.0.1 --port 8001
-
-For multi-worker deployments, the same rule applies: run the preparation command once before starting the worker processes.
 
 The default local Data Agent address is therefore:
 
@@ -459,7 +483,7 @@ Then run:
     python -m pytest tests
     cd ..
 
-The DuckDB migration includes automated coverage for areas including:
+The DuckDB implementation and automated startup lifecycle include coverage for areas including:
 
 - dataset loading;
 - deterministic cleaning;
@@ -478,9 +502,13 @@ The DuckDB migration includes automated coverage for areas including:
 - managed chart retention;
 - FastAPI startup cleanup;
 - periodic cleanup;
-- graceful cleanup-task cancellation during shutdown.
+- graceful cleanup-task cancellation during shutdown;
+- worker-count validation;
+- exactly-once preparation before multi-worker startup;
+- prevention of worker startup when preparation fails;
+- concurrent read-only access from multiple isolated worker processes to a prepared temporary DuckDB database.
 
-After the DuckDB migration, the complete Data Agent suite must be used as the authoritative source for the current automated-test count.
+The complete Data Agent suite currently contains 91 passing automated tests.
 
 The installed FastAPI/Starlette testing dependency stack may also report a `StarletteDeprecationWarning` related to its test-client implementation. This warning does not represent a failing project test or an application runtime error.
 

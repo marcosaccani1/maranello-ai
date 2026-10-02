@@ -611,10 +611,11 @@ The Python Data Agent is an independent FastAPI microservice responsible for str
 
 Its responsibilities include:
 
-- preparing the Manufacturing Dataset through an explicit pre-worker command;
+- automatically preparing the Manufacturing Dataset before normal worker startup;
 - cleaning known data-quality issues with Pandas during database preparation;
 - materializing the prepared dataset into a local DuckDB database before workers start;
-- validating at worker startup that the analytical database has already been prepared;
+- starting the configured FastAPI workers only after preparation succeeds;
+- validating at each worker startup that the analytical database has already been prepared;
 - interpreting supported analytical requests;
 - calculating manufacturing KPIs through deterministic read-only DuckDB queries;
 - executing grouped analyses;
@@ -631,11 +632,13 @@ The service uses:
     DuckDB
     Matplotlib
 
-The analytical data layer is divided into an explicit preparation phase and a separate runtime query phase:
+The analytical data layer is divided into an automatically orchestrated pre-worker preparation phase and a separate runtime query phase:
 
-    CSV source dataset
+    python -m app.commands.start_data_agent
           ↓
-    python -m app.commands.prepare_database
+    Pre-worker preparation
+          ↓
+    CSV source dataset
           ↓
     DataLoader
           ↓
@@ -645,9 +648,9 @@ The analytical data layer is divided into an explicit preparation phase and a se
           ↓
     DuckDBDatasetStore.reload()
           ↓
-    Local DuckDB database
+    Local DuckDB database ready
           ↓
-    FastAPI worker startup
+    Uvicorn starts configured workers
           ↓
     Read-only readiness validation
           ↓
@@ -655,7 +658,7 @@ The analytical data layer is divided into an explicit preparation phase and a se
           ↓
     Deterministic read-only analytical queries
 
-The explicit preparation command owns creation and refresh of the local analytical database through `DuckDBDatasetStore`. The source CSV remains the reproducible project data source, while the generated DuckDB database is a rebuildable runtime artifact.
+The launcher owns the normal startup sequence and completes creation or refresh of the local analytical database through `prepare_database()` before invoking Uvicorn. The source CSV remains the reproducible project data source, while the generated DuckDB database is a rebuildable runtime artifact. The standalone `python -m app.commands.prepare_database` command remains available for explicit maintenance or rebuild operations.
 
 FastAPI workers do not lazily initialize or rebuild the analytical database. They validate its readiness at startup and then use `DuckDBAnalysisRepository` for query-oriented KPI, grouped and monthly analytical operations through read-only DuckDB connections.
 
@@ -1397,10 +1400,9 @@ The recommended startup order is:
     1. Activate Python environment
     2. Start ChromaDB
     3. Ensure the Knowledge Base is indexed
-    4. Prepare the DuckDB analytical database
-    5. Start Python Data Agent
-    6. Start Node.js Backend
-    7. Start React Frontend
+    4. Start Python Data Agent through the automated pre-worker launcher
+    5. Start Node.js Backend
+    6. Start React Frontend
 
 Starting the infrastructure dependencies first makes service availability easier to verify before launching the user-facing application.
 
@@ -1555,21 +1557,23 @@ Enter the Data Agent directory:
 
     cd data_agent
 
-Before starting any FastAPI worker, prepare the persistent analytical database:
+Start the Data Agent through the automated launcher:
+
+    python -m app.commands.start_data_agent
+
+The launcher loads and cleans the source CSV with the deterministic Pandas pipeline, materializes the prepared dataset into DuckDB and verifies that preparation completed successfully before invoking Uvicorn.
+
+The default worker count is one. Multi-worker startup can be configured through the root environment configuration:
+
+    DATA_AGENT_WORKERS=3 python -m app.commands.start_data_agent
+
+Preparation runs exactly once in the launcher process before any FastAPI worker is created. Each worker then performs only a read-only readiness validation and uses read-only DuckDB connections during analytical requests.
+
+If database preparation fails, Uvicorn is never invoked and no worker process is started.
+
+The standalone preparation command remains available for maintenance or an explicit database rebuild without starting the service:
 
     python -m app.commands.prepare_database
-
-This command loads and cleans the source CSV with the deterministic Pandas pipeline and materializes the prepared dataset into DuckDB.
-
-The preparation command must complete before the Data Agent is started. It is executed once before worker startup rather than independently by each worker, preventing concurrent processes from attempting to initialize the same DuckDB database.
-
-After preparation succeeds, start the FastAPI application using Uvicorn:
-
-    uvicorn app.main:app --host 127.0.0.1 --port 8001
-
-At startup, the worker performs a read-only readiness validation. If the analytical database has not been prepared, startup fails fast with an explicit instruction to run the preparation command.
-
-For a multi-worker deployment, run `python -m app.commands.prepare_database` once before launching the worker processes.
 
 The service should become available at:
 
@@ -1681,7 +1685,7 @@ In addition:
 
     [ ] Manufacturing Dataset is available
 
-    [ ] DuckDB analytical database has been prepared before Data Agent startup
+    [ ] Data Agent launcher completes DuckDB preparation before worker startup
 
     [ ] Browser can reach the React application
 
@@ -2821,8 +2825,11 @@ The automated suite covers areas including:
 - grouped and monthly analyses;
 - chart generation;
 - API behavior;
-- explicit pre-worker DuckDB dataset preparation and refresh;
+- automated pre-worker DuckDB dataset preparation and refresh;
 - persistence of the prepared analytical schema in DuckDB;
+- exactly-once preparation before multi-worker startup;
+- prevention of worker startup when preparation fails;
+- concurrent read-only DuckDB access from multiple isolated worker processes;
 - fail-fast worker startup when the analytical database is not prepared;
 - read-only readiness validation without preparation dependencies;
 - deterministic KPI queries through `DuckDBAnalysisRepository`;
@@ -2837,9 +2844,9 @@ The automated suite covers areas including:
 - periodic chart cleanup during runtime;
 - graceful cleanup-task cancellation during application shutdown.
 
-The DuckDB migration extends the previous automated baseline. The complete Data Agent suite must be used as the authoritative source for the current test count after the migration.
+The complete Data Agent suite currently contains 91 passing automated tests. This includes the DuckDB analytical layer, automated startup sequencing and real multi-process read-only validation.
 
-The final post-migration test count is intentionally not hard-coded in this section until the complete validation suite is executed.
+Together with the 120 passing Node.js Backend tests, the current automated project baseline is 211 passing tests.
 
 Ruff remains part of the required static-verification workflow.
 
@@ -3277,11 +3284,11 @@ Persistent distributed conversation storage is therefore considered a future enh
 
 The Python Data Agent uses DuckDB as its embedded analytical storage and query layer.
 
-The source CSV remains the reproducible source dataset. Deterministic preparation is executed explicitly before worker startup through `python -m app.commands.prepare_database`. The command uses `DataLoader`, `DataCleaner`, Pandas and `DuckDBDatasetStore.reload()` to materialize the prepared records into a local DuckDB database.
+The source CSV remains the reproducible source dataset. During normal service startup, deterministic preparation is automatically orchestrated by `python -m app.commands.start_data_agent`. The launcher invokes `prepare_database()`, which uses `DataLoader`, `DataCleaner`, Pandas and `DuckDBDatasetStore.reload()` to materialize the prepared records into a local DuckDB database before Uvicorn creates any worker process.
 
-FastAPI workers do not own dataset initialization. At startup they perform only a read-only readiness validation and fail fast if the database has not been prepared. Supported KPI, grouped and monthly analyses are then executed through `DuckDBAnalysisRepository` using read-only DuckDB connections rather than by querying a complete prepared DataFrame held as the primary analytical runtime.
+FastAPI workers do not own dataset initialization. At startup they perform only a read-only readiness validation and fail fast if the database is unavailable or invalid. Supported KPI, grouped and monthly analyses are then executed through `DuckDBAnalysisRepository` using read-only DuckDB connections rather than by querying a complete prepared DataFrame held as the primary analytical runtime.
 
-Separating preparation from worker startup prevents multiple worker processes from competing to initialize or replace the same embedded database.
+Separating the preparation writer from the worker runtime and enforcing their order in the launcher prevents multiple worker processes from competing to initialize or replace the same embedded database. The standalone `python -m app.commands.prepare_database` command remains available for explicit rebuild operations.
 
 The generated DuckDB database is a rebuildable runtime artifact and is not committed to the repository.
 
@@ -4033,9 +4040,8 @@ The clean-clone validation confirmed the complete setup workflow:
           ↓
     Index Knowledge Base
           ↓
-    Prepare DuckDB Analytical Database
-          ↓
     Start Python Data Agent
+    through automated pre-worker preparation
           ↓
     Start Node.js Backend
           ↓
@@ -4050,7 +4056,9 @@ The clean environment successfully verified:
 - Python 3.12 Data Agent environment creation;
 - ChromaDB CLI installation and local server startup;
 - Knowledge Base ingestion with 5 documents and 149 indexed chunks;
-- explicit DuckDB analytical database preparation before Data Agent startup;
+- automated DuckDB analytical database preparation before worker startup;
+- exactly-once preparation before multi-worker startup;
+- concurrent read-only access by multiple Data Agent worker processes;
 - Python Data Agent health and analytical execution;
 - Node.js Backend health and orchestration;
 - React conversational interface;
@@ -4075,11 +4083,11 @@ The final quality checks executed successfully include:
     Production build
 
     Python Data Agent
-    86 automated tests
+    91 automated tests
     Ruff verification
 
     Automated Backend + Data Agent baseline
-    206 tests
+    211 tests
 
 During clean-clone validation, the setup documentation was also improved to explicitly verify the Python interpreter version and document the ChromaDB CLI installation procedure.
 
